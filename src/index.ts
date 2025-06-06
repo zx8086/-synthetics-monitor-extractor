@@ -146,7 +146,7 @@ const kafka = new Kafka({
     },
   }),
   retry: {
-    initialRetryTime: 100,
+    initialRetryTime: 1000,
     retries: 8
   },
   connectionTimeout: 3000, // 3 seconds
@@ -170,6 +170,7 @@ async function checkKafkaConnection() {
       try {
         await admin.connect();
         console.log("✅ Successfully connected to Kafka");
+        await new Promise(resolve => setTimeout(resolve, 1000));
         break;
       } catch (error: any) {
         retries--;
@@ -646,6 +647,10 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
   for (const item of transformedData) {
     const domain = item.businessContext.domain || "unknown";
     const department = item.businessContext.department || "unknown";
+    const timestamp = new Date(item.timestamp).getTime();
+    
+    // Generate a unique document ID that includes timestamp
+    const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
 
     // Create domain key for kafka topics
     const domainKey = `${domain}`;
@@ -655,7 +660,7 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
     }
 
     messagesByDomain[domainKey].push({
-      key: item.id,
+      key: uniqueKey, // Use the unique key here
       value: JSON.stringify(item),
       headers: {
         "monitor-type": item.type,
@@ -677,17 +682,23 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
   sendPromises.push(
     producer.send({
       topic: "monitoring.raw.events",
-      messages: transformedData.map((item) => ({
-        key: item.id,
-        value: JSON.stringify(item),
-        headers: {
-          "monitor-type": item.type,
-          status: item.status,
-          domain: item.businessContext.domain,
-          department: item.businessContext.department,
-          environment: item.environment,
-        },
-      })),
+      messages: transformedData.map((item) => {
+        const domain = item.businessContext.domain || "unknown";
+        const timestamp = new Date(item.timestamp).getTime();
+        const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
+        
+        return {
+          key: uniqueKey, // Use the unique key here too
+          value: JSON.stringify(item),
+          headers: {
+            "monitor-type": item.type,
+            status: item.status,
+            domain: domain,
+            department: item.businessContext.department,
+            environment: item.environment,
+          },
+        };
+      }),
     }).then(() => {
       console.log(`Successfully sent messages to monitoring.raw.events`);
     }).catch(error => {
