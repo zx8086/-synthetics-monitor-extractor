@@ -1,52 +1,341 @@
 /* src/index.ts */
 
-import { Client } from "@elastic/elasticsearch";
+import { Client, estypes } from "@elastic/elasticsearch";
 import { Kafka } from "kafkajs";
 import fs from "fs";
 import path from "path";
 import strict from "assert/strict";
+import { HttpConnection } from "@elastic/transport";
 
-// Create Elasticsearch client
-const elasticClient = new Client({
-  node: Bun.env.ELASTIC_NODE || "https://elasticsearch:9200",
-  auth: {
-    username: Bun.env.ELASTIC_USERNAME,
-    password: Bun.env.ELASTIC_PASSWORD,
-    // Alternatively, use API key
-    // apiKey: process.env.ELASTIC_API_KEY,
-  },
-  tls: {
-    rejectUnauthorized: Bun.NODE_ENV === "production", // False for dev environments
-  },
-});
+// Type definitions
+interface BusinessContext {
+  domain: string;
+  department: string;
+  criticality: 'high' | 'medium' | 'low';
+  environment: string;
+}
 
-// Create Kafka client
+interface ServiceInfo {
+  name: string;
+  endpoint: string;
+}
+
+interface MonitorInfo {
+  id: string;
+  name: string;
+  type: string;
+  url?: string;
+  timestamp: string;
+  status: string;
+  duration: number;
+  businessContext: BusinessContext;
+  tags: string[];
+  environment: string;
+  service: ServiceInfo;
+  http?: {
+    statusCode?: number;
+    responseTime?: number;
+    body?: {
+      bytes?: number;
+      content?: any;
+    };
+  };
+  tls?: {
+    established: boolean;
+    version?: string;
+  };
+  agent?: {
+    name: string;
+    id: string;
+    type: string;
+    version: string;
+  };
+  observer?: {
+    name: string;
+    geo?: string;
+  };
+  meta?: {
+    space_id: string;
+  };
+}
+
+interface ElasticsearchHit {
+  _source: {
+    monitor: {
+      id: string;
+      name: string;
+      type: string;
+      status: string;
+      duration?: { us: number };
+    };
+    url?: {
+      full?: string;
+      domain?: string;
+      path?: string;
+    };
+    '@timestamp': string;
+    tags?: string[];
+    http?: {
+      response?: { 
+        status_code: number;
+        body?: {
+          bytes?: number;
+          content?: any;
+        };
+      };
+      rtt?: { total?: { us: number } };
+    };
+    tls?: {
+      established: boolean;
+      version?: string;
+    };
+    agent?: {
+      name: string;
+      id: string;
+      type: string;
+      ephemeral_id: string;
+      version: string;
+    };
+    observer?: {
+      geo?: {
+        name: string;
+      };
+      name: string;
+    };
+    meta?: {
+      space_id: string;
+    };
+  };
+}
+
+interface SearchResponse<T> {
+  took: number;
+  timed_out: boolean;
+  _shards: {
+    total: number;
+    successful: number;
+    skipped: number;
+    failed: number;
+  };
+  hits: {
+    total: {
+      value: number;
+      relation: string;
+    };
+    max_score: number | null;
+    hits: Array<{
+      _index: string;
+      _id: string;
+      _score: number | null;
+      _source: T;
+      sort?: number[];
+    }>;
+  };
+}
+
+// Create Kafka client with better timeout handling
 const kafka = new Kafka({
-  clientId: "synthetics-extractor",
+  clientId: Bun.env.KAFKA_CLIENT_ID || "synthetics-extractor",
   brokers: (Bun.env.KAFKA_BROKERS || "192.168.178.10:9092").split(","),
   ssl: Bun.env.KAFKA_SSL === "true",
   ...(Bun.env.KAFKA_SSL === "true" && {
     sasl: {
       mechanism: "plain",
-      username: Bun.env.KAFKA_USERNAME,
-      password: Bun.env.KAFKA_PASSWORD,
+      username: Bun.env.KAFKA_USERNAME || "",
+      password: Bun.env.KAFKA_PASSWORD || "",
     },
   }),
+  retry: {
+    initialRetryTime: 100,
+    retries: 8
+  },
+  connectionTimeout: 3000, // 3 seconds
+  authenticationTimeout: 3000, // 3 seconds
+  requestTimeout: 30000 // 30 seconds
 });
 
 const producer = kafka.producer();
 
-// Monitor configuration - could be loaded from a database or config file
-const monitorConfig = loadMonitorConfig();
+// Check Kafka connection and list topics
+async function checkKafkaConnection() {
+  try {
+    console.log("Attempting to connect to Kafka at:", Bun.env.KAFKA_BROKERS || "192.168.178.10:9092");
+    
+    // Create admin client for topic operations
+    const admin = kafka.admin();
+    
+    // Connect to Kafka with retry logic
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        await admin.connect();
+        console.log("✅ Successfully connected to Kafka");
+        break;
+      } catch (error: any) {
+        retries--;
+        if (retries === 0) throw error;
+        console.log(`Retrying Kafka connection... (${retries} attempts remaining)`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    // List all topics
+    const topics = await admin.listTopics();
+    
+    // Filter for monitoring topics
+    const monitoringTopics = topics.filter(topic => topic.startsWith('monitoring.'));
+    console.log("📋 Available monitoring topics:", monitoringTopics);
+    
+    // Get topic details for monitoring topics only
+    const topicDetails = await admin.fetchTopicMetadata({
+      topics: monitoringTopics
+    });
+    
+    console.log("📊 Monitoring topic details:");
+    topicDetails.topics.forEach(topic => {
+      console.log(`  - ${topic.name}:`);
+      console.log(`    Partitions: ${topic.partitions.length}`);
+      console.log(`    Replication Factor: ${topic.partitions[0]?.replicas.length || 'unknown'}`);
+    });
+    
+    // Disconnect admin client
+    await admin.disconnect();
+    
+    return true;
+  } catch (error: any) {
+    console.error("❌ Failed to connect to Kafka");
+    console.error("Error details:", error?.message || "Unknown error");
+    if (error?.stack) {
+      console.error("Stack trace:", error.stack);
+    }
+    return false;
+  }
+}
+
+// Create a singleton Elasticsearch client
+let elasticClientInstance: Client | null = null;
+
+function getElasticsearchClient(): Client {
+  if (!elasticClientInstance) {
+    console.log("Creating new Elasticsearch client instance");
+    elasticClientInstance = new Client({
+      node: Bun.env.ELASTIC_NODE || "https://elasticsearch:9200",
+      auth: {
+        apiKey: {
+          id: Bun.env.ELASTIC_API_KEY_ID || "",
+          api_key: Bun.env.ELASTIC_API_KEY || ""
+        },
+      },
+      Connection: HttpConnection,
+      compression: true,
+      maxRetries: 5,
+      requestTimeout: 30000, // 30 seconds
+      sniffOnStart: false, // Disable sniffing to avoid errors
+      name: "synthetics-extractor",
+      opaqueIdPrefix: "synthetics-extractor::",
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Accept-Encoding': 'gzip, deflate'
+      },
+      context: {
+        userAgent: "synthetics-extractor/1.0.0 (bun)"
+      },
+      redaction: {
+        type: 'replace',
+        additionalKeys: ['authorization', 'x-elastic-client-meta']
+      },
+      tls: {
+        rejectUnauthorized: process.env.NODE_ENV === "production"
+      }
+    });
+  }
+  return elasticClientInstance;
+}
+
+// Check Elasticsearch connection with retry logic
+async function checkElasticsearchConnection() {
+  const maxRetries = 3;
+  let retries = maxRetries;
+  
+  while (retries > 0) {
+    try {
+      const client = getElasticsearchClient();
+      console.log(`Attempting to connect to Elasticsearch (${maxRetries - retries + 1}/${maxRetries})...`);
+      
+      // Use a simple ping request instead of info() for initial connection test
+      const pingResponse = await client.ping();
+      
+      if (pingResponse) {
+        // If ping succeeds, then get cluster info
+        const info = await client.info();
+        
+        console.log("✅ Successfully connected to Elasticsearch", {
+          version: info.version?.number,
+          clusterName: info.cluster_name,
+          clusterUuid: info.cluster_uuid,
+          luceneVersion: info.version?.lucene_version,
+        });
+        
+        // Store version info for feature detection
+        const serverVersion = info.version?.number ?? "0.0.0";
+        const majorVersion = parseInt(serverVersion.split('.')[0] ?? "0");
+        
+        if (majorVersion >= 9) {
+          console.log(`🆕 Connected to Elasticsearch ${serverVersion} - using modern client features`);
+        } else if (majorVersion >= 8) {
+          console.log(`⚡ Connected to Elasticsearch ${serverVersion} - full feature support`);
+        } else {
+          console.warn(`⚠️ Connected to older Elasticsearch ${serverVersion} - some features may be limited`);
+        }
+        
+        return true;
+      }
+      
+      return false;
+    } catch (error: any) {
+      retries--;
+      if (retries === 0) {
+        console.error("❌ Failed to connect to Elasticsearch after all retries");
+        console.error("Error details:", error?.message || "Unknown error");
+        if (error?.meta?.body) {
+          console.error("Response:", error.meta.body);
+        }
+        if (error?.meta?.statusCode) {
+          console.error("Status code:", error.meta.statusCode);
+        }
+        if (error?.meta?.headers) {
+          console.error("Response headers:", error.meta.headers);
+        }
+        return false;
+      }
+      console.log(`Retrying Elasticsearch connection... (${retries} attempts remaining)`);
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds between retries
+    }
+  }
+  return false;
+}
 
 // Main function to extract and process monitor data
 async function extractAndProcessMonitors() {
   try {
     console.log("Starting synthetic monitor data extraction...");
 
-    // Connect to Kafka
+    // Check Elasticsearch connection first
+    const isElasticConnected = await checkElasticsearchConnection();
+    if (!isElasticConnected) {
+      throw new Error("Failed to connect to Elasticsearch");
+    }
+
+    // Check Kafka connection and list topics
+    const isKafkaConnected = await checkKafkaConnection();
+    if (!isKafkaConnected) {
+      throw new Error("Failed to connect to Kafka");
+    }
+
+    // Connect to Kafka producer
     await producer.connect();
-    console.log("Connected to Kafka");
+    console.log("Connected to Kafka producer");
 
     // Fetch all synthetic monitor data
     const monitorData = await fetchAllMonitorData();
@@ -73,44 +362,90 @@ async function extractAndProcessMonitors() {
 // Fetch all monitor data from Elasticsearch
 async function fetchAllMonitorData() {
   const timeRange = "now-5m";
-  const size = 1000; // Adjust based on your monitor count
+  const size = 1000;
+  const client = getElasticsearchClient();
 
   try {
     // Build the query to get all synthetic monitors
-    const query = {
+    const query: estypes.SearchRequest = {
       index: "synthetics-*",
-      body: {
-        query: {
-          bool: {
-            must: [
-              // Time range filter
-              {
-                range: {
-                  "@timestamp": {
-                    gte: timeRange,
-                  },
-                },
-              },
-            ],
-          },
-        },
-        sort: [{ "@timestamp": { order: "desc" } }],
-        size: size,
-      },
+      track_total_hits: true,
+      timeout: "30s",
+      size,
+      sort: [
+        { "@timestamp": "desc" }
+      ],
+      query: {
+        bool: {
+          must: [
+            {
+              wildcard: {
+                "monitor.name": "*"
+              }
+            },
+            {
+              range: {
+                "@timestamp": {
+                  gte: timeRange
+                }
+              }
+            }
+          ]
+        }
+      }
     };
 
-    // Execute the search
-    const response = await elasticClient.search(query);
+    console.log("Executing Elasticsearch query...");
+    console.log("Query parameters:", {
+      timeRange,
+      size,
+      index: "synthetics-*"
+    });
+    console.log("Full query:", JSON.stringify(query, null, 2));
 
-    return response.hits.hits;
-  } catch (error) {
+    // Execute the search with timeout handling
+    const response = await client.search<ElasticsearchHit['_source']>(query).catch(error => {
+      if (error.name === 'TimeoutError') {
+        console.error("Elasticsearch query timed out. Retrying with longer timeout...");
+        // Retry with longer timeout
+        return client.search<ElasticsearchHit['_source']>({
+          ...query,
+          timeout: "120s"
+        });
+      }
+      throw error;
+    });
+
+    console.log("Query response:", {
+      total: response.hits.total,
+      took: response.took,
+      timed_out: response.timed_out,
+      hits: response.hits.hits.length
+    });
+    
+    if (response.hits.hits.length === 0) {
+      console.log("No hits found. Checking if index exists...");
+      const indices = await client.cat.indices({ format: 'json' });
+      console.log("Available indices:", indices.map(idx => idx.index));
+    }
+    
+    return response.hits.hits.map(hit => ({
+      _source: hit._source
+    })) as ElasticsearchHit[];
+  } catch (error: any) {
     console.error(`Error fetching monitor data:`, error);
+    if (error.meta?.body) {
+      console.error("Elasticsearch response:", error.meta.body);
+    }
+    if (error.meta?.statusCode) {
+      console.error("Status code:", error.meta.statusCode);
+    }
     return [];
   }
 }
 
 // Transform monitor data into our standardized format
-function transformMonitorData(monitorData) {
+function transformMonitorData(monitorData: ElasticsearchHit[]): MonitorInfo[] {
   return monitorData.map((hit) => {
     const source = hit._source;
 
@@ -118,26 +453,38 @@ function transformMonitorData(monitorData) {
     const businessContext = extractBusinessContext(source);
 
     // Extract base monitor info
-    const monitorInfo = {
+    const monitorInfo: MonitorInfo = {
       id: source.monitor.id,
       name: source.monitor.name,
       type: source.monitor.type,
       url: source.url?.full,
       timestamp: source["@timestamp"],
       status: source.monitor.status,
-      duration: source.monitor.duration?.us / 1000, // Convert to ms
+      duration: source.monitor.duration?.us ? source.monitor.duration.us / 1000 : 0, // Convert to ms
       businessContext: businessContext,
       tags: source.tags || [],
       environment: businessContext.environment,
-    };
-
-    // Add HTTP-specific details if available
-    if (source.http) {
-      monitorInfo.http = {
+      service: extractServiceInfo(source),
+      agent: source.agent ? {
+        name: source.agent.name,
+        id: source.agent.id,
+        type: source.agent.type,
+        version: source.agent.version
+      } : undefined,
+      observer: source.observer ? {
+        name: source.observer.name,
+        geo: source.observer.geo?.name
+      } : undefined,
+      meta: source.meta,
+      http: source.http ? {
         statusCode: source.http.response?.status_code,
-        responseTime: source.http.rtt?.total?.us / 1000, // Convert to ms
-      };
-    }
+        responseTime: source.http.rtt?.total?.us ? source.http.rtt.total.us / 1000 : undefined,
+        body: source.http.response?.body ? {
+          bytes: source.http.response.body.bytes,
+          content: source.http.response.body.content
+        } : undefined
+      } : undefined
+    };
 
     // Add TLS-specific details if available
     if (source.tls) {
@@ -147,56 +494,13 @@ function transformMonitorData(monitorData) {
       };
     }
 
-    // Add service-specific metadata
-    monitorInfo.service = extractServiceInfo(source);
-
     return monitorInfo;
   });
 }
 
-// Extract environment information from monitor data
-function extractEnvironment(source) {
-  // Try to extract from tags first
-  if (source.tags) {
-    const envTags = ["production", "development", "staging", "testing", "qa"];
-    for (const tag of source.tags) {
-      const normalizedTag = tag.toLowerCase();
-      if (envTags.includes(normalizedTag)) {
-        return normalizedTag;
-      }
-
-      // Check for abbreviated environments
-      if (normalizedTag === "prod") return "production";
-      if (normalizedTag === "dev") return "development";
-      if (normalizedTag === "test") return "testing";
-    }
-  }
-
-  // Try to extract from monitor name
-  if (source.monitor?.name) {
-    const name = source.monitor.name.toLowerCase();
-    if (name.includes("prod") || name.includes("prd")) return "production";
-    if (name.includes("dev")) return "development";
-    if (name.includes("stage") || name.includes("stg")) return "staging";
-    if (name.includes("test") || name.includes("qa")) return "testing";
-  }
-
-  // Try to extract from URL
-  if (source.url?.domain) {
-    const domain = source.url.domain.toLowerCase();
-    if (domain.includes("prod") || domain.includes("prd")) return "production";
-    if (domain.includes("dev")) return "development";
-    if (domain.includes("stage") || domain.includes("stg")) return "staging";
-    if (domain.includes("test") || domain.includes("qa")) return "testing";
-  }
-
-  // Default
-  return "unknown";
-}
-
 // Extract business context directly from monitor tags
-function extractBusinessContext(source) {
-  const context = {
+function extractBusinessContext(source: ElasticsearchHit['_source']): BusinessContext {
+  const context: BusinessContext = {
     domain: "unknown",
     department: "unknown",
     criticality: "medium", // Default criticality
@@ -206,22 +510,21 @@ function extractBusinessContext(source) {
   // Extract from tags if available
   if (source.tags && Array.isArray(source.tags)) {
     for (const tag of source.tags) {
+      const lowerTag = tag.toLowerCase();
+      
       // Check for domain tag
-      if (tag.toLowerCase().startsWith("domain:")) {
-        context.domain = tag.split(":")[1].trim().toLowerCase();
+      if (lowerTag.startsWith("domain:")) {
+        context.domain = tag.split(":")[1]?.trim().toLowerCase() || "unknown";
       }
 
       // Check for department tag
-      if (tag.toLowerCase().startsWith("department:")) {
-        context.department = tag.split(":")[1].trim().toLowerCase();
+      if (lowerTag.startsWith("department:")) {
+        context.department = tag.split(":")[1]?.trim().toLowerCase() || "unknown";
       }
 
       // Check for criticality/priority tags
-      if (
-        tag.toLowerCase().startsWith("criticality:") ||
-        tag.toLowerCase().startsWith("priority:")
-      ) {
-        const value = tag.split(":")[1].trim().toLowerCase();
+      if (lowerTag.startsWith("criticality:") || lowerTag.startsWith("priority:")) {
+        const value = tag.split(":")[1]?.trim().toLowerCase() || "medium";
         context.criticality =
           value === "high" || value === "critical"
             ? "high"
@@ -231,22 +534,16 @@ function extractBusinessContext(source) {
       }
 
       // Check for environment tags
-      if (tag.toLowerCase() === "production" || tag.toLowerCase() === "prod") {
+      if (lowerTag.startsWith("environment:")) {
+        const env = tag.split(":")[1]?.trim().toLowerCase() || "unknown";
+        context.environment = env;
+      } else if (lowerTag === "production" || lowerTag === "prod") {
         context.environment = "production";
-      } else if (
-        tag.toLowerCase() === "development" ||
-        tag.toLowerCase() === "dev"
-      ) {
+      } else if (lowerTag === "development" || lowerTag === "dev") {
         context.environment = "development";
-      } else if (
-        tag.toLowerCase() === "staging" ||
-        tag.toLowerCase() === "stage"
-      ) {
+      } else if (lowerTag === "staging" || lowerTag === "stage") {
         context.environment = "staging";
-      } else if (
-        tag.toLowerCase() === "testing" ||
-        tag.toLowerCase() === "test"
-      ) {
+      } else if (lowerTag === "testing" || lowerTag === "test") {
         context.environment = "testing";
       }
     }
@@ -284,9 +581,9 @@ function extractBusinessContext(source) {
 }
 
 // Extract service information from monitor data
-function extractServiceInfo(source) {
+function extractServiceInfo(source: ElasticsearchHit['_source']): ServiceInfo {
   // Start with default service info
-  const serviceInfo = {
+  const serviceInfo: ServiceInfo = {
     name: "unknown",
     endpoint: "/",
   };
@@ -295,7 +592,7 @@ function extractServiceInfo(source) {
   if (source.tags && Array.isArray(source.tags)) {
     for (const tag of source.tags) {
       if (tag.toLowerCase().startsWith("service:")) {
-        serviceInfo.name = tag.split(":")[1].trim();
+        serviceInfo.name = tag.split(":")[1]?.trim() || "unknown";
         break;
       }
     }
@@ -306,7 +603,7 @@ function extractServiceInfo(source) {
     // Try to derive service name from domain
     if (source.url.domain) {
       const domainParts = source.url.domain.split(".");
-      serviceInfo.name = domainParts[0];
+      serviceInfo.name = domainParts[0] || "unknown";
 
       // Clean up common prefixes/suffixes
       serviceInfo.name = serviceInfo.name
@@ -327,10 +624,10 @@ function extractServiceInfo(source) {
     const parts = source.monitor.name.split("|");
     if (parts.length > 1) {
       serviceInfo.name = parts[1]
-        .trim()
+        ?.trim()
         .replace(/-api$/, "")
         .replace(/^api-/, "")
-        .replace(/-service$/, "");
+        .replace(/-service$/, "") || "unknown";
     }
   }
 
@@ -338,13 +635,13 @@ function extractServiceInfo(source) {
 }
 
 // Send transformed monitor data to Kafka
-async function sendToKafka(transformedData) {
+async function sendToKafka(transformedData: MonitorInfo[]) {
   if (!transformedData || transformedData.length === 0) {
     return;
   }
 
   // Batch the messages by domain
-  const messagesByDomain = {};
+  const messagesByDomain: Record<string, any[]> = {};
 
   for (const item of transformedData) {
     const domain = item.businessContext.domain || "unknown";
@@ -370,10 +667,13 @@ async function sendToKafka(transformedData) {
     });
   }
 
+  console.log("Messages grouped by domain:", Object.keys(messagesByDomain));
+
   // Send to domain-specific topics and the raw events topic
   const sendPromises = [];
 
   // Send to raw events topic
+  console.log(`Sending ${transformedData.length} messages to topic: monitoring.raw.events`);
   sendPromises.push(
     producer.send({
       topic: "monitoring.raw.events",
@@ -388,18 +688,28 @@ async function sendToKafka(transformedData) {
           environment: item.environment,
         },
       })),
-    }),
+    }).then(() => {
+      console.log(`Successfully sent messages to monitoring.raw.events`);
+    }).catch(error => {
+      console.error(`Failed to send messages to monitoring.raw.events:`, error);
+    })
   );
 
   // Send to domain-specific topics
   for (const [domain, messages] of Object.entries(messagesByDomain)) {
     // Create a valid Kafka topic name (lowercase, replace spaces/special chars)
     const topicName = `monitoring.${domain.toLowerCase().replace(/[^a-z0-9]/g, "-")}.events`;
+    console.log(`Sending ${messages.length} messages to topic: ${topicName}`);
+    
     sendPromises.push(
       producer.send({
         topic: topicName,
         messages,
-      }),
+      }).then(() => {
+        console.log(`Successfully sent messages to ${topicName}`);
+      }).catch(error => {
+        console.error(`Failed to send messages to ${topicName}:`, error);
+      })
     );
   }
 
