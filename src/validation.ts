@@ -1,3 +1,6 @@
+
+/* src/validation.ts */
+
 import { Client } from "@elastic/elasticsearch";
 import { Kafka } from "kafkajs";
 import { config } from "./config.js";

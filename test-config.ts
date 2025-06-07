@@ -1,3 +1,5 @@
+/* test-config.ts */
+
 import { config, validateEnvironment } from "./src/config.js";
 
 console.log("🧪 Testing configuration system...");

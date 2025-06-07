@@ -1,3 +1,5 @@
+/* src/config.ts */
+
 import { z } from "zod";
 
 const ElasticsearchConfigSchema = z
