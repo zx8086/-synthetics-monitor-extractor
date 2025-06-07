@@ -788,7 +788,12 @@ async function startExtractionProcess() {
 
   // Initial run
   console.log("Running initial data extraction...");
-  await extractAndProcessMonitors();
+  try {
+    await extractAndProcessMonitors();
+  } catch (error) {
+    console.error("❌ Initial extraction failed:", error);
+    console.log("⚠️ Continuing with interval setup - subsequent extractions will be retried");
+  }
 
   // Set up interval for regular extraction
   const intervalMinutes = config.extraction.intervalMinutes;
@@ -830,7 +835,7 @@ if (import.meta.main) {
     await startExtractionProcess();
   })().catch((error) => {
     console.error("Failed to start extraction process:", error);
-    process.exit(1);
+    console.log("⚠️ Service will continue running - interval may still be set up if the error occurred after interval setup");
   });
 }
 
