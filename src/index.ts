@@ -13,26 +13,28 @@ import {
   validateMonitorInfo,
   ElasticsearchSourceSchema,
 } from "./types.js";
+import { config } from "./config.js";
+import { validateConnections } from "./validation.js";
 
-// Create Kafka client with better timeout handling
+// Create Kafka client using configuration
 const kafka = new Kafka({
-  clientId: Bun.env.KAFKA_CLIENT_ID || "synthetics-extractor",
-  brokers: (Bun.env.KAFKA_BROKERS || "192.168.178.10:9092").split(","),
-  ssl: Bun.env.KAFKA_SSL === "true",
-  ...(Bun.env.KAFKA_SSL === "true" && {
+  clientId: config.kafka.clientId,
+  brokers: config.kafka.brokers,
+  ssl: config.kafka.ssl,
+  ...(config.kafka.ssl && config.kafka.username && config.kafka.password && {
     sasl: {
       mechanism: "plain",
-      username: Bun.env.KAFKA_USERNAME || "",
-      password: Bun.env.KAFKA_PASSWORD || "",
+      username: config.kafka.username,
+      password: config.kafka.password,
     },
   }),
   retry: {
-    initialRetryTime: 1000,
-    retries: 8,
+    initialRetryTime: config.kafka.initialRetryTime,
+    retries: config.kafka.retries,
   },
-  connectionTimeout: 3000, // 3 seconds
-  authenticationTimeout: 3000, // 3 seconds
-  requestTimeout: 30000, // 30 seconds
+  connectionTimeout: config.kafka.connectionTimeout,
+  authenticationTimeout: config.kafka.authenticationTimeout,
+  requestTimeout: config.kafka.requestTimeout,
 });
 
 const producer = kafka.producer();
@@ -42,7 +44,7 @@ async function checkKafkaConnection() {
   try {
     console.log(
       "Attempting to connect to Kafka at:",
-      Bun.env.KAFKA_BROKERS || "192.168.178.10:9092",
+      config.kafka.brokers.join(","),
     );
 
     // Create admin client for topic operations
@@ -109,19 +111,14 @@ let elasticClientInstance: Client | null = null;
 function getElasticsearchClient(): Client {
   if (!elasticClientInstance) {
     console.log("Creating new Elasticsearch client instance");
-    elasticClientInstance = new Client({
-      node: Bun.env.ELASTIC_NODE || "https://elasticsearch:9200",
-      auth: {
-        apiKey: {
-          id: Bun.env.ELASTIC_API_KEY_ID || "",
-          api_key: Bun.env.ELASTIC_API_KEY || "",
-        },
-      },
+    
+    const clientConfig: any = {
+      node: config.elasticsearch.node,
       Connection: HttpConnection,
-      compression: true,
-      maxRetries: 5,
-      requestTimeout: 30000, // 30 seconds
-      sniffOnStart: false, // Disable sniffing to avoid errors
+      compression: config.elasticsearch.compression,
+      maxRetries: config.elasticsearch.maxRetries,
+      requestTimeout: config.elasticsearch.requestTimeout,
+      sniffOnStart: config.elasticsearch.sniffOnStart,
       name: "synthetics-extractor",
       opaqueIdPrefix: "synthetics-extractor::",
       headers: {
@@ -137,9 +134,20 @@ function getElasticsearchClient(): Client {
         additionalKeys: ["authorization", "x-elastic-client-meta"],
       },
       tls: {
-        rejectUnauthorized: process.env.NODE_ENV === "production",
+        rejectUnauthorized: config.elasticsearch.rejectUnauthorized,
       },
-    });
+    };
+
+    if (config.elasticsearch.apiKeyId && config.elasticsearch.apiKey) {
+      clientConfig.auth = {
+        apiKey: {
+          id: config.elasticsearch.apiKeyId,
+          api_key: config.elasticsearch.apiKey,
+        },
+      };
+    }
+
+    elasticClientInstance = new Client(clientConfig);
   }
   return elasticClientInstance;
 }
@@ -264,16 +272,16 @@ async function extractAndProcessMonitors() {
 
 // Fetch all monitor data from Elasticsearch
 async function fetchAllMonitorData() {
-  const timeRange = "now-5m";
-  const size = 1000;
+  const timeRange = config.extraction.timeRange;
+  const size = config.extraction.maxResults;
   const client = getElasticsearchClient();
 
   try {
     // Build the query to get all synthetic monitors
     const query: estypes.SearchRequest = {
-      index: "synthetics-*",
+      index: config.extraction.indexPattern,
       track_total_hits: true,
-      timeout: "30s",
+      timeout: config.extraction.timeout,
       size,
       sort: [{ "@timestamp": "desc" }],
       query: {
@@ -300,7 +308,7 @@ async function fetchAllMonitorData() {
     console.log("Query parameters:", {
       timeRange,
       size,
-      index: "synthetics-*",
+      index: config.extraction.indexPattern,
     });
     console.log("Full query:", JSON.stringify(query, null, 2));
 
@@ -690,14 +698,23 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
 
 // Start the extraction process on an interval
 async function startExtractionProcess() {
+  console.log("🚀 Starting synthetics monitor extractor...");
+  const connectionValidation = await validateConnections();
+  
+  if (!connectionValidation.valid) {
+    console.error("❌ Connection validation failed:", connectionValidation.errors.join(', '));
+    process.exit(1);
+  }
+  
+  if (connectionValidation.warnings && connectionValidation.warnings.length > 0) {
+    console.log("✅ Connections validated:", connectionValidation.warnings.join(', '));
+  }
+
   // Initial run
   await extractAndProcessMonitors();
 
   // Set up interval for regular extraction
-  const intervalMinutes = parseInt(
-    process.env.EXTRACTION_INTERVAL_MINUTES || "1",
-    10,
-  );
+  const intervalMinutes = config.extraction.intervalMinutes;
   console.log(
     `Setting up extraction to run every ${intervalMinutes} minute(s)`,
   );
@@ -713,7 +730,7 @@ process.on("SIGTERM", async () => {
 });
 
 // Run the extraction process if this file is executed directly
-if (require.main === module) {
+if (import.meta.main) {
   startExtractionProcess().catch((error) => {
     console.error("Failed to start extraction process:", error);
     process.exit(1);
