@@ -2,7 +2,7 @@
 /* src/validation.ts */
 
 import { Client } from "@elastic/elasticsearch";
-import { Kafka } from "kafkajs";
+import { Admin } from "@platformatic/kafka";
 import { config } from "./config.js";
 import { HttpConnection } from "@elastic/elasticsearch";
 
@@ -130,31 +130,26 @@ async function validateKafkaConnection(): Promise<ValidationResult> {
   const warnings: string[] = [];
 
   try {
-    const kafka = new Kafka({
+    const admin = new Admin({
       clientId: config.kafka.clientId,
-      brokers: config.kafka.brokers,
-      ssl: config.kafka.ssl,
+      bootstrapBrokers: config.kafka.brokers,
+      ...(config.kafka.ssl && {
+        tls: {
+          rejectUnauthorized: true,
+        },
+      }),
       ...(config.kafka.ssl && config.kafka.username && config.kafka.password && {
         sasl: {
-          mechanism: "plain",
+          mechanism: "PLAIN" as const,
           username: config.kafka.username,
           password: config.kafka.password,
         },
       }),
-      retry: {
-        initialRetryTime: config.kafka.initialRetryTime,
-        retries: config.kafka.retries,
-      },
-      connectionTimeout: config.kafka.connectionTimeout,
-      authenticationTimeout: config.kafka.authenticationTimeout,
-      requestTimeout: config.kafka.requestTimeout,
     });
 
-    const admin = kafka.admin();
-    await admin.connect();
-
-    const topics = await admin.listTopics();
-    const monitoringTopics = topics.filter(topic => topic.startsWith('monitoring.'));
+    const metadata = await admin.metadata({ topics: [] });
+    const topics = Array.from(metadata.topics.keys());
+    const monitoringTopics = topics.filter((topic: string) => topic.startsWith('monitoring.'));
 
     if (monitoringTopics.length === 0) {
       warnings.push("No monitoring topics found in Kafka cluster");
@@ -162,7 +157,7 @@ async function validateKafkaConnection(): Promise<ValidationResult> {
       warnings.push(`Found ${monitoringTopics.length} monitoring topics`);
     }
 
-    await admin.disconnect();
+    await admin.close();
 
     return {
       valid: true,
