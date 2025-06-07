@@ -317,6 +317,7 @@ async function extractAndProcessMonitors() {
     await sendToKafka(transformedData);
 
     console.log("Monitor extraction completed successfully");
+    return; // Explicit return to ensure function completes
   } catch (error) {
     console.error("Error in extraction process:", error);
   }
@@ -763,7 +764,12 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
   }
 
   try {
-    await Promise.all(sendPromises);
+    await Promise.race([
+      Promise.all(sendPromises),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Kafka send timeout after 30 seconds')), 30000)
+      )
+    ]);
     console.log(
       `Successfully sent ${validatedData.length} messages to Kafka`,
     );
