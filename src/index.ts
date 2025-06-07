@@ -3,6 +3,7 @@
 import { Client, estypes } from "@elastic/elasticsearch";
 import { Producer, Admin, stringSerializers } from "@platformatic/kafka";
 import { HttpConnection } from "@elastic/transport";
+import * as promClient from 'prom-client';
 import {
   type BusinessContext,
   type ServiceInfo,
@@ -15,12 +16,25 @@ import {
 } from "./types.js";
 import { config } from "./config.js";
 import { validateConnections } from "./validation.js";
+import { 
+  initializeMetrics, 
+  startMetricsServer, 
+  registry,
+  kafkaProducedMessagesCounter,
+  kafkaProducerErrorsCounter,
+  kafkaMessageSizeHistogram
+} from './metrics';
 
-// Create Kafka producer using platformatic configuration
+initializeMetrics();
+
 const producer = new Producer({
   clientId: config.kafka.clientId,
   bootstrapBrokers: config.kafka.brokers,
   serializers: stringSerializers,
+  metrics: { 
+    client: promClient, 
+    registry: registry 
+  },
   ...(config.kafka.ssl && {
     tls: {
       rejectUnauthorized: true,
@@ -675,6 +689,9 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
           const domain = item.businessContext.domain || "unknown";
           const timestamp = new Date(item.timestamp).getTime();
           const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
+          const messageSize = Buffer.byteLength(JSON.stringify(item));
+          
+          kafkaMessageSizeHistogram.observe({ topic: "monitoring.raw.events" }, messageSize);
 
           return {
             topic: "monitoring.raw.events",
@@ -691,9 +708,12 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
         }),
       })
       .then(() => {
+        kafkaProducedMessagesCounter.inc({ topic: "monitoring.raw.events", status: 'success' }, validatedData.length);
         console.log(`Successfully sent messages to monitoring.raw.events`);
       })
       .catch((error: any) => {
+        kafkaProducerErrorsCounter.inc({ topic: "monitoring.raw.events", error_type: 'send_failure' });
+        kafkaProducedMessagesCounter.inc({ topic: "monitoring.raw.events", status: 'error' }, validatedData.length);
         console.error(
           `Failed to send messages to monitoring.raw.events:`,
           error,
@@ -710,23 +730,31 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
     sendPromises.push(
       producer
         .send({
-          messages: messages.map(msg => ({
-            topic: topicName,
-            key: msg.key,
-            value: msg.value,
-            headers: new Map([
-              ["monitor-type", msg.headers["monitor-type"]],
-              ["status", msg.headers["status"]],
-              ["domain", msg.headers["domain"]],
-              ["department", msg.headers["department"]],
-              ["environment", msg.headers["environment"]],
-            ]),
-          })),
+          messages: messages.map(msg => {
+            const messageSize = Buffer.byteLength(msg.value);
+            kafkaMessageSizeHistogram.observe({ topic: topicName }, messageSize);
+            
+            return {
+              topic: topicName,
+              key: msg.key,
+              value: msg.value,
+              headers: new Map([
+                ["monitor-type", msg.headers["monitor-type"]],
+                ["status", msg.headers["status"]],
+                ["domain", msg.headers["domain"]],
+                ["department", msg.headers["department"]],
+                ["environment", msg.headers["environment"]],
+              ]),
+            };
+          }),
         })
         .then(() => {
+          kafkaProducedMessagesCounter.inc({ topic: topicName, status: 'success' }, messages.length);
           console.log(`Successfully sent messages to ${topicName}`);
         })
         .catch((error: any) => {
+          kafkaProducerErrorsCounter.inc({ topic: topicName, error_type: 'send_failure' });
+          kafkaProducedMessagesCounter.inc({ topic: topicName, status: 'error' }, messages.length);
           console.error(`Failed to send messages to ${topicName}:`, error);
         }),
     );
@@ -777,7 +805,10 @@ process.on("SIGTERM", async () => {
 
 // Run the extraction process if this file is executed directly
 if (import.meta.main) {
-  startExtractionProcess().catch((error) => {
+  (async () => {
+    const metricsServer = await startMetricsServer();
+    await startExtractionProcess();
+  })().catch((error) => {
     console.error("Failed to start extraction process:", error);
     process.exit(1);
   });

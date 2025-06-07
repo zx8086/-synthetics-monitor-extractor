@@ -76,11 +76,19 @@ const LoggingConfigSchema = z.object({
   includeTimestamp: z.boolean().default(true),
 });
 
+const MetricsConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  port: z.number().min(1000).max(65535).default(9090),
+  prefix: z.string().default("synthetics_extractor__"),
+  endpoint: z.string().default("/metrics"),
+});
+
 const ConfigSchema = z.object({
   elasticsearch: ElasticsearchConfigSchema,
   kafka: KafkaConfigSchema,
   extraction: ExtractionConfigSchema,
   logging: LoggingConfigSchema,
+  metrics: MetricsConfigSchema,
   nodeEnv: z.enum(["development", "production", "staging"]).default("development"),
 });
 
@@ -119,6 +127,12 @@ const defaultConfig: Config = {
     level: "info",
     format: "text",
     includeTimestamp: true,
+  },
+  metrics: {
+    enabled: true,
+    port: 9090,
+    prefix: "synthetics_extractor__",
+    endpoint: "/metrics",
   },
   nodeEnv: "development",
 };
@@ -160,6 +174,12 @@ const envVarMapping = {
     level: "LOG_LEVEL",
     format: "LOG_FORMAT",
     includeTimestamp: "LOG_INCLUDE_TIMESTAMP",
+  },
+  metrics: {
+    enabled: "METRICS_ENABLED",
+    port: "METRICS_PORT",
+    prefix: "METRICS_PREFIX",
+    endpoint: "METRICS_ENDPOINT",
   },
   nodeEnv: "NODE_ENV",
 } as const;
@@ -241,6 +261,13 @@ function loadConfigFromEnv(): Partial<Config> {
     includeTimestamp: getEnvConfig(envVarMapping.logging.includeTimestamp, "boolean"),
   };
 
+  envConfig.metrics = {
+    enabled: getEnvConfig(envVarMapping.metrics.enabled, "boolean"),
+    port: getEnvConfig(envVarMapping.metrics.port, "number"),
+    prefix: getEnvConfig(envVarMapping.metrics.prefix, "string"),
+    endpoint: getEnvConfig(envVarMapping.metrics.endpoint, "string"),
+  };
+
   // Load NodeEnv
   envConfig.nodeEnv = getEnvConfig(envVarMapping.nodeEnv, "string");
 
@@ -250,6 +277,7 @@ function loadConfigFromEnv(): Partial<Config> {
     kafka: { ...defaultConfig.kafka, ...envConfig.kafka },
     extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
     logging: { ...defaultConfig.logging, ...envConfig.logging },
+    metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
     nodeEnv: envConfig.nodeEnv || defaultConfig.nodeEnv,
   });
 
@@ -371,6 +399,7 @@ try {
     kafka: { ...defaultConfig.kafka, ...envConfig.kafka },
     extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
     logging: { ...defaultConfig.logging, ...envConfig.logging },
+    metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
     nodeEnv: envConfig.nodeEnv || defaultConfig.nodeEnv,
   };
 
@@ -404,6 +433,11 @@ try {
           logging: {
             level: config.logging.level,
             format: config.logging.format,
+          },
+          metrics: {
+            enabled: config.metrics.enabled,
+            port: config.metrics.port,
+            prefix: config.metrics.prefix,
           },
           nodeEnv: config.nodeEnv,
         },
@@ -440,6 +474,7 @@ export function getConfigDocumentation(): Record<string, any> {
         "Data extraction and processing configuration",
       ),
       logging: LoggingConfigSchema.describe("Logging configuration"),
+      metrics: MetricsConfigSchema.describe("Metrics configuration"),
     },
   };
 }
