@@ -3,132 +3,16 @@
 import { Client, estypes } from "@elastic/elasticsearch";
 import { Kafka } from "kafkajs";
 import { HttpConnection } from "@elastic/transport";
-
-// Type definitions
-interface BusinessContext {
-  domain: string;
-  department: string;
-  criticality: "high" | "medium" | "low";
-  environment: string;
-}
-
-interface ServiceInfo {
-  name: string;
-  endpoint: string;
-}
-
-interface MonitorInfo {
-  id: string;
-  name: string;
-  type: string;
-  url?: string;
-  timestamp: string;
-  status: string;
-  duration: number;
-  businessContext: BusinessContext;
-  tags: string[];
-  environment: string;
-  service: ServiceInfo;
-  http?: {
-    statusCode?: number;
-    responseTime?: number;
-    body?: {
-      bytes?: number;
-      content?: any;
-    };
-  };
-  tls?: {
-    established: boolean;
-    version?: string;
-  };
-  agent?: {
-    name: string;
-    id: string;
-    type: string;
-    version: string;
-  };
-  observer?: {
-    name: string;
-    geo?: string;
-  };
-  meta?: {
-    space_id: string;
-  };
-}
-
-interface ElasticsearchHit {
-  _source: {
-    monitor: {
-      id: string;
-      name: string;
-      type: string;
-      status: string;
-      duration?: { us: number };
-    };
-    url?: {
-      full?: string;
-      domain?: string;
-      path?: string;
-    };
-    "@timestamp": string;
-    tags?: string[];
-    http?: {
-      response?: {
-        status_code: number;
-        body?: {
-          bytes?: number;
-          content?: any;
-        };
-      };
-      rtt?: { total?: { us: number } };
-    };
-    tls?: {
-      established: boolean;
-      version?: string;
-    };
-    agent?: {
-      name: string;
-      id: string;
-      type: string;
-      ephemeral_id: string;
-      version: string;
-    };
-    observer?: {
-      geo?: {
-        name: string;
-      };
-      name: string;
-    };
-    meta?: {
-      space_id: string;
-    };
-  };
-}
-
-interface SearchResponse<T> {
-  took: number;
-  timed_out: boolean;
-  _shards: {
-    total: number;
-    successful: number;
-    skipped: number;
-    failed: number;
-  };
-  hits: {
-    total: {
-      value: number;
-      relation: string;
-    };
-    max_score: number | null;
-    hits: Array<{
-      _index: string;
-      _id: string;
-      _score: number | null;
-      _source: T;
-      sort?: number[];
-    }>;
-  };
-}
+import {
+  type BusinessContext,
+  type ServiceInfo,
+  type MonitorInfo,
+  type ElasticsearchHit,
+  type SearchResponse,
+  validateElasticsearchHits,
+  validateMonitorInfo,
+  ElasticsearchSourceSchema,
+} from "./types.js";
 
 // Create Kafka client with better timeout handling
 const kafka = new Kafka({
@@ -453,9 +337,14 @@ async function fetchAllMonitorData() {
       );
     }
 
-    return response.hits.hits.map((hit) => ({
+    const rawHits = response.hits.hits.map((hit) => ({
       _source: hit._source,
-    })) as ElasticsearchHit[];
+    }));
+
+    const validatedHits = validateElasticsearchHits(rawHits);
+    console.log(`Validated ${validatedHits.length} Elasticsearch hits`);
+
+    return validatedHits;
   } catch (error: any) {
     console.error(`Error fetching monitor data:`, error);
     if (error.meta?.body) {
@@ -470,7 +359,7 @@ async function fetchAllMonitorData() {
 
 // Transform monitor data into our standardized format
 function transformMonitorData(monitorData: ElasticsearchHit[]): MonitorInfo[] {
-  return monitorData.map((hit) => {
+  const transformedData = monitorData.map((hit) => {
     const source = hit._source;
 
     // Extract business context directly from tags
@@ -532,12 +421,19 @@ function transformMonitorData(monitorData: ElasticsearchHit[]): MonitorInfo[] {
 
     return monitorInfo;
   });
+
+  const validatedData = validateMonitorInfo(transformedData);
+  console.log(`Validated ${validatedData.length} transformed monitor records`);
+
+  return validatedData;
 }
 
 // Extract business context directly from monitor tags
 function extractBusinessContext(
   source: ElasticsearchHit["_source"],
 ): BusinessContext {
+  const validatedSource = ElasticsearchSourceSchema.parse(source);
+  
   const context: BusinessContext = {
     domain: "unknown",
     department: "unknown",
@@ -546,8 +442,8 @@ function extractBusinessContext(
   };
 
   // Extract from tags if available
-  if (source.tags && Array.isArray(source.tags)) {
-    for (const tag of source.tags) {
+  if (validatedSource.tags && Array.isArray(validatedSource.tags)) {
+    for (const tag of validatedSource.tags) {
       const lowerTag = tag.toLowerCase();
 
       // Check for domain tag
@@ -592,8 +488,8 @@ function extractBusinessContext(
   }
 
   // Try to extract environment from monitor name if not found in tags
-  if (context.environment === "unknown" && source.monitor?.name) {
-    const name = source.monitor.name.toLowerCase();
+  if (context.environment === "unknown" && validatedSource.monitor?.name) {
+    const name = validatedSource.monitor.name.toLowerCase();
     if (name.includes("prod") || name.includes("prd")) {
       context.environment = "production";
     } else if (name.includes("dev")) {
@@ -606,8 +502,8 @@ function extractBusinessContext(
   }
 
   // Try to extract from URL if environment still unknown
-  if (context.environment === "unknown" && source.url?.domain) {
-    const domain = source.url.domain.toLowerCase();
+  if (context.environment === "unknown" && validatedSource.url?.domain) {
+    const domain = validatedSource.url.domain.toLowerCase();
     if (domain.includes("prod") || domain.includes("prd")) {
       context.environment = "production";
     } else if (domain.includes("dev")) {
@@ -624,6 +520,8 @@ function extractBusinessContext(
 
 // Extract service information from monitor data
 function extractServiceInfo(source: ElasticsearchHit["_source"]): ServiceInfo {
+  const validatedSource = ElasticsearchSourceSchema.parse(source);
+  
   // Start with default service info
   const serviceInfo: ServiceInfo = {
     name: "unknown",
@@ -631,8 +529,8 @@ function extractServiceInfo(source: ElasticsearchHit["_source"]): ServiceInfo {
   };
 
   // Check for explicit service tag
-  if (source.tags && Array.isArray(source.tags)) {
-    for (const tag of source.tags) {
+  if (validatedSource.tags && Array.isArray(validatedSource.tags)) {
+    for (const tag of validatedSource.tags) {
       if (tag.toLowerCase().startsWith("service:")) {
         serviceInfo.name = tag.split(":")[1]?.trim() || "unknown";
         break;
@@ -641,10 +539,10 @@ function extractServiceInfo(source: ElasticsearchHit["_source"]): ServiceInfo {
   }
 
   // If no service tag found, extract from URL if available
-  if (serviceInfo.name === "unknown" && source.url) {
+  if (serviceInfo.name === "unknown" && validatedSource.url) {
     // Try to derive service name from domain
-    if (source.url.domain) {
-      const domainParts = source.url.domain.split(".");
+    if (validatedSource.url.domain) {
+      const domainParts = validatedSource.url.domain.split(".");
       serviceInfo.name = domainParts[0] || "unknown";
 
       // Clean up common prefixes/suffixes
@@ -655,15 +553,15 @@ function extractServiceInfo(source: ElasticsearchHit["_source"]): ServiceInfo {
     }
 
     // Get endpoint from path
-    if (source.url.path) {
-      serviceInfo.endpoint = source.url.path;
+    if (validatedSource.url.path) {
+      serviceInfo.endpoint = validatedSource.url.path;
     }
   }
 
   // If still unknown, extract from monitor name if possible
-  if (serviceInfo.name === "unknown" && source.monitor?.name) {
+  if (serviceInfo.name === "unknown" && validatedSource.monitor?.name) {
     // Parse monitor name patterns like "DS - API Health - prd | Process-api"
-    const parts = source.monitor.name.split("|");
+    const parts = validatedSource.monitor.name.split("|");
     if (parts.length > 1) {
       serviceInfo.name =
         parts[1]
@@ -683,10 +581,13 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
     return;
   }
 
+  const validatedData = validateMonitorInfo(transformedData);
+  console.log(`Final validation: ${validatedData.length} records ready for Kafka`);
+
   // Batch the messages by domain
   const messagesByDomain: Record<string, any[]> = {};
 
-  for (const item of transformedData) {
+  for (const item of validatedData) {
     const domain = item.businessContext.domain || "unknown";
     const department = item.businessContext.department || "unknown";
     const timestamp = new Date(item.timestamp).getTime();
@@ -721,13 +622,13 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
 
   // Send to raw events topic
   console.log(
-    `Sending ${transformedData.length} messages to topic: monitoring.raw.events`,
+    `Sending ${validatedData.length} messages to topic: monitoring.raw.events`,
   );
   sendPromises.push(
     producer
       .send({
         topic: "monitoring.raw.events",
-        messages: transformedData.map((item) => {
+        messages: validatedData.map((item) => {
           const domain = item.businessContext.domain || "unknown";
           const timestamp = new Date(item.timestamp).getTime();
           const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
@@ -780,7 +681,7 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
   try {
     await Promise.all(sendPromises);
     console.log(
-      `Successfully sent ${transformedData.length} messages to Kafka`,
+      `Successfully sent ${validatedData.length} messages to Kafka`,
     );
   } catch (error) {
     console.error("Error sending to Kafka:", error);
