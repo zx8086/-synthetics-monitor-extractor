@@ -760,7 +760,18 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
   }
 
   try {
-    await Promise.all(sendPromises);
+    const results = await Promise.allSettled(sendPromises);
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
+    console.log(`Successfully sent ${successful}/${sendPromises.length} message batches to Kafka`);
+    if (failed > 0) {
+      console.warn(`${failed} message batches failed to send`);
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`Batch ${index} failed:`, result.reason);
+        }
+      });
+    }
     console.log(
       `Successfully sent ${validatedData.length} messages to Kafka`,
     );
