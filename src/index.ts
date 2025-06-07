@@ -20,8 +20,6 @@ import {
   initializeMetrics, 
   startMetricsServer, 
   registry,
-  kafkaProducedMessagesCounter,
-  kafkaProducerErrorsCounter,
   kafkaMessageSizeHistogram
 } from './metrics';
 
@@ -31,10 +29,6 @@ const producer = new Producer({
   clientId: config.kafka.clientId,
   bootstrapBrokers: config.kafka.brokers,
   serializers: stringSerializers,
-  metrics: { 
-    client: promClient, 
-    registry: registry 
-  },
   ...(config.kafka.ssl && {
     tls: {
       rejectUnauthorized: true,
@@ -663,7 +657,7 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
     }
 
     messagesByDomain[domainKey].push({
-      key: uniqueKey, // Use the unique key here
+      key: uniqueKey,
       value: JSON.stringify(item),
       headers: {
         "monitor-type": item.type,
@@ -676,6 +670,21 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
   }
 
   console.log("Messages grouped by domain:", Object.keys(messagesByDomain));
+
+  if (config.metrics.enabled) {
+    validatedData.forEach((item) => {
+      const messageSize = Buffer.byteLength(JSON.stringify(item));
+      kafkaMessageSizeHistogram.observe({ topic: "monitoring.raw.events" }, messageSize);
+    });
+    
+    for (const [domain, messages] of Object.entries(messagesByDomain)) {
+      const topicName = `monitoring.${domain.toLowerCase().replace(/[^a-z0-9]/g, "-")}.events`;
+      messages.forEach(msg => {
+        const messageSize = Buffer.byteLength(msg.value);
+        kafkaMessageSizeHistogram.observe({ topic: topicName }, messageSize);
+      });
+    }
+  }
 
   // Send to domain-specific topics and the raw events topic
   const sendPromises = [];
@@ -691,9 +700,6 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
           const domain = item.businessContext.domain || "unknown";
           const timestamp = new Date(item.timestamp).getTime();
           const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
-          const messageSize = Buffer.byteLength(JSON.stringify(item));
-          
-          kafkaMessageSizeHistogram.observe({ topic: "monitoring.raw.events" }, messageSize);
 
           return {
             topic: "monitoring.raw.events",
@@ -710,12 +716,9 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
         }),
       })
       .then(() => {
-        kafkaProducedMessagesCounter.inc({ topic: "monitoring.raw.events", status: 'success' }, validatedData.length);
         console.log(`Successfully sent messages to monitoring.raw.events`);
       })
       .catch((error: any) => {
-        kafkaProducerErrorsCounter.inc({ topic: "monitoring.raw.events", error_type: 'send_failure' });
-        kafkaProducedMessagesCounter.inc({ topic: "monitoring.raw.events", status: 'error' }, validatedData.length);
         console.error(
           `Failed to send messages to monitoring.raw.events:`,
           error,
@@ -733,9 +736,6 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
       producer
         .send({
           messages: messages.map(msg => {
-            const messageSize = Buffer.byteLength(msg.value);
-            kafkaMessageSizeHistogram.observe({ topic: topicName }, messageSize);
-            
             return {
               topic: topicName,
               key: msg.key,
@@ -751,12 +751,9 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
           }),
         })
         .then(() => {
-          kafkaProducedMessagesCounter.inc({ topic: topicName, status: 'success' }, messages.length);
           console.log(`Successfully sent messages to ${topicName}`);
         })
         .catch((error: any) => {
-          kafkaProducerErrorsCounter.inc({ topic: topicName, error_type: 'send_failure' });
-          kafkaProducedMessagesCounter.inc({ topic: topicName, status: 'error' }, messages.length);
           console.error(`Failed to send messages to ${topicName}:`, error);
         }),
     );
