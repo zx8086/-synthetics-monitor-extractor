@@ -81,7 +81,7 @@ const ConfigSchema = z.object({
   kafka: KafkaConfigSchema,
   extraction: ExtractionConfigSchema,
   logging: LoggingConfigSchema,
-  nodeEnv: z.enum(["development", "production", "test"]).default("development"),
+  nodeEnv: z.enum(["development", "production", "staging"]).default("development"),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
