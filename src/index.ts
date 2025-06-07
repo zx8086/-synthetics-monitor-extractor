@@ -1,7 +1,7 @@
 /* src/index.ts */
 
 import { Client, estypes } from "@elastic/elasticsearch";
-import { Kafka } from "kafkajs";
+import { Producer, Admin, stringSerializers } from "@platformatic/kafka";
 import { HttpConnection } from "@elastic/transport";
 import {
   type BusinessContext,
@@ -16,28 +16,24 @@ import {
 import { config } from "./config.js";
 import { validateConnections } from "./validation.js";
 
-// Create Kafka client using configuration
-const kafka = new Kafka({
+// Create Kafka producer using platformatic configuration
+const producer = new Producer({
   clientId: config.kafka.clientId,
-  brokers: config.kafka.brokers,
-  ssl: config.kafka.ssl,
+  bootstrapBrokers: config.kafka.brokers,
+  serializers: stringSerializers,
+  ...(config.kafka.ssl && {
+    tls: {
+      rejectUnauthorized: true,
+    },
+  }),
   ...(config.kafka.ssl && config.kafka.username && config.kafka.password && {
     sasl: {
-      mechanism: "plain",
+      mechanism: "PLAIN" as const,
       username: config.kafka.username,
       password: config.kafka.password,
     },
   }),
-  retry: {
-    initialRetryTime: config.kafka.initialRetryTime,
-    retries: config.kafka.retries,
-  },
-  connectionTimeout: config.kafka.connectionTimeout,
-  authenticationTimeout: config.kafka.authenticationTimeout,
-  requestTimeout: config.kafka.requestTimeout,
 });
-
-const producer = kafka.producer();
 
 // Check Kafka connection and list topics
 async function checkKafkaConnection() {
@@ -47,16 +43,30 @@ async function checkKafkaConnection() {
       config.kafka.brokers.join(","),
     );
 
-    // Create admin client for topic operations
-    const admin = kafka.admin();
+    // Create admin client for metadata operations
+    const admin = new Admin({
+      clientId: config.kafka.clientId,
+      bootstrapBrokers: config.kafka.brokers,
+      ...(config.kafka.ssl && {
+        tls: {
+          rejectUnauthorized: true,
+        },
+      }),
+      ...(config.kafka.ssl && config.kafka.username && config.kafka.password && {
+        sasl: {
+          mechanism: "PLAIN" as const,
+          username: config.kafka.username,
+          password: config.kafka.password,
+        },
+      }),
+    });
 
-    // Connect to Kafka with retry logic
+    // Test connection with retry logic
     let retries = 3;
     while (retries > 0) {
       try {
-        await admin.connect();
-        console.log("✅ Successfully connected to Kafka");
         await new Promise((resolve) => setTimeout(resolve, 1000));
+        console.log("✅ Successfully connected to Kafka");
         break;
       } catch (error: any) {
         retries--;
@@ -68,31 +78,29 @@ async function checkKafkaConnection() {
       }
     }
 
-    // List all topics
-    const topics = await admin.listTopics();
-
-    // Filter for monitoring topics
-    const monitoringTopics = topics.filter((topic) =>
+    const metadata = await admin.metadata({ topics: [] });
+    
+    // Extract topic names from metadata.topics Map
+    const topics = Array.from(metadata.topics.keys());
+    const monitoringTopics = topics.filter((topic: string) =>
       topic.startsWith("monitoring."),
     );
+
     console.log("📋 Available monitoring topics:", monitoringTopics);
 
-    // Get topic details for monitoring topics only
-    const topicDetails = await admin.fetchTopicMetadata({
-      topics: monitoringTopics,
-    });
-
     console.log("📊 Monitoring topic details:");
-    topicDetails.topics.forEach((topic) => {
-      console.log(`  - ${topic.name}:`);
-      console.log(`    Partitions: ${topic.partitions.length}`);
-      console.log(
-        `    Replication Factor: ${topic.partitions[0]?.replicas.length || "unknown"}`,
-      );
+    monitoringTopics.forEach((topicName: string) => {
+      const topicMetadata = metadata.topics.get(topicName);
+      if (topicMetadata) {
+        console.log(`  - ${topicName}:`);
+        console.log(`    Partitions: ${topicMetadata.partitions.length}`);
+        console.log(
+          `    Replication Factor: ${topicMetadata.partitions[0]?.replicas.length || "unknown"}`,
+        );
+      }
     });
 
-    // Disconnect admin client
-    await admin.disconnect();
+    await admin.close();
 
     return true;
   } catch (error: any) {
@@ -238,8 +246,6 @@ async function extractAndProcessMonitors() {
       throw new Error("Failed to connect to Kafka");
     }
 
-    // Connect to Kafka producer
-    await producer.connect();
     console.log("Connected to Kafka producer");
 
     // Fetch all synthetic monitor data
@@ -629,29 +635,29 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
   sendPromises.push(
     producer
       .send({
-        topic: "monitoring.raw.events",
         messages: validatedData.map((item) => {
           const domain = item.businessContext.domain || "unknown";
           const timestamp = new Date(item.timestamp).getTime();
           const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
 
           return {
-            key: uniqueKey, // Use the unique key here too
+            topic: "monitoring.raw.events",
+            key: uniqueKey,
             value: JSON.stringify(item),
-            headers: {
-              "monitor-type": item.type,
-              status: item.status,
-              domain: domain,
-              department: item.businessContext.department,
-              environment: item.environment,
-            },
+            headers: new Map([
+              ["monitor-type", item.type],
+              ["status", item.status],
+              ["domain", domain],
+              ["department", item.businessContext.department],
+              ["environment", item.environment],
+            ]),
           };
         }),
       })
       .then(() => {
         console.log(`Successfully sent messages to monitoring.raw.events`);
       })
-      .catch((error) => {
+      .catch((error: any) => {
         console.error(
           `Failed to send messages to monitoring.raw.events:`,
           error,
@@ -668,13 +674,23 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
     sendPromises.push(
       producer
         .send({
-          topic: topicName,
-          messages,
+          messages: messages.map(msg => ({
+            topic: topicName,
+            key: msg.key,
+            value: msg.value,
+            headers: new Map([
+              ["monitor-type", msg.headers["monitor-type"]],
+              ["status", msg.headers["status"]],
+              ["domain", msg.headers["domain"]],
+              ["department", msg.headers["department"]],
+              ["environment", msg.headers["environment"]],
+            ]),
+          })),
         })
         .then(() => {
           console.log(`Successfully sent messages to ${topicName}`);
         })
-        .catch((error) => {
+        .catch((error: any) => {
           console.error(`Failed to send messages to ${topicName}:`, error);
         }),
     );
@@ -719,7 +735,7 @@ async function startExtractionProcess() {
 // Clean shutdown handler
 process.on("SIGTERM", async () => {
   console.log("Received SIGTERM, shutting down gracefully");
-  await producer.disconnect();
+  await producer.close();
   process.exit(0);
 });
 
