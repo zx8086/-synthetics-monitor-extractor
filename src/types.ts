@@ -1,5 +1,6 @@
-import { z } from "zod";
+/* src/types.ts */
 
+import { z } from "zod";
 
 export const BusinessContextSchema = z.object({
   domain: z.string(),
@@ -10,7 +11,6 @@ export const BusinessContextSchema = z.object({
 
 export type BusinessContext = z.infer<typeof BusinessContextSchema>;
 
-
 export const ServiceInfoSchema = z.object({
   name: z.string(),
   endpoint: z.string(),
@@ -18,38 +18,49 @@ export const ServiceInfoSchema = z.object({
 
 export type ServiceInfo = z.infer<typeof ServiceInfoSchema>;
 
+export const HttpBodySchema = z
+  .object({
+    bytes: z.number().optional(),
+    content: z.any().optional(),
+  })
+  .optional();
 
-export const HttpBodySchema = z.object({
-  bytes: z.number().optional(),
-  content: z.any().optional(),
-}).optional();
+export const HttpInfoSchema = z
+  .object({
+    statusCode: z.number().optional(),
+    responseTime: z.number().optional(),
+    body: HttpBodySchema,
+  })
+  .optional();
 
-export const HttpInfoSchema = z.object({
-  statusCode: z.number().optional(),
-  responseTime: z.number().optional(),
-  body: HttpBodySchema,
-}).optional();
+export const TlsInfoSchema = z
+  .object({
+    established: z.boolean(),
+    version: z.string().optional(),
+  })
+  .optional();
 
-export const TlsInfoSchema = z.object({
-  established: z.boolean(),
-  version: z.string().optional(),
-}).optional();
+export const AgentInfoSchema = z
+  .object({
+    name: z.string(),
+    id: z.string(),
+    type: z.string(),
+    version: z.string(),
+  })
+  .optional();
 
-export const AgentInfoSchema = z.object({
-  name: z.string(),
-  id: z.string(),
-  type: z.string(),
-  version: z.string(),
-}).optional();
+export const ObserverInfoSchema = z
+  .object({
+    name: z.string(),
+    geo: z.string().optional(),
+  })
+  .optional();
 
-export const ObserverInfoSchema = z.object({
-  name: z.string(),
-  geo: z.string().optional(),
-}).optional();
-
-export const MetaInfoSchema = z.object({
-  space_id: z.string(),
-}).optional();
+export const MetaInfoSchema = z
+  .object({
+    space_id: z.string(),
+  })
+  .optional();
 
 export const MonitorInfoSchema = z.object({
   id: z.string(),
@@ -72,63 +83,86 @@ export const MonitorInfoSchema = z.object({
 
 export type MonitorInfo = z.infer<typeof MonitorInfoSchema>;
 
-
 export const ElasticsearchMonitorSchema = z.object({
   id: z.string(),
   name: z.string(),
   type: z.string(),
   status: z.string(),
-  duration: z.object({
-    us: z.number(),
-  }).optional(),
+  duration: z
+    .object({
+      us: z.number(),
+    })
+    .optional(),
 });
 
-export const ElasticsearchUrlSchema = z.object({
-  full: z.string().optional(),
-  domain: z.string().optional(),
-  path: z.string().optional(),
-}).optional();
+export const ElasticsearchUrlSchema = z
+  .object({
+    full: z.string().optional(),
+    domain: z.string().optional(),
+    path: z.string().optional(),
+  })
+  .optional();
 
-export const ElasticsearchHttpResponseSchema = z.object({
-  status_code: z.number(),
-  body: z.object({
-    bytes: z.number().optional(),
-    content: z.any().optional(),
-  }).optional(),
-}).optional();
+export const ElasticsearchHttpResponseSchema = z
+  .object({
+    status_code: z.number(),
+    body: z
+      .object({
+        bytes: z.number().optional(),
+        content: z.any().optional(),
+      })
+      .optional(),
+  })
+  .optional();
 
-export const ElasticsearchHttpSchema = z.object({
-  response: ElasticsearchHttpResponseSchema,
-  rtt: z.object({
-    total: z.object({
-      us: z.number(),
-    }).optional(),
-  }).optional(),
-}).optional();
+export const ElasticsearchHttpSchema = z
+  .object({
+    response: ElasticsearchHttpResponseSchema,
+    rtt: z
+      .object({
+        total: z
+          .object({
+            us: z.number(),
+          })
+          .optional(),
+      })
+      .optional(),
+  })
+  .optional();
 
-export const ElasticsearchTlsSchema = z.object({
-  established: z.boolean(),
-  version: z.string().optional(),
-}).optional();
+export const ElasticsearchTlsSchema = z
+  .object({
+    established: z.boolean(),
+    version: z.string().optional(),
+  })
+  .optional();
 
-export const ElasticsearchAgentSchema = z.object({
-  name: z.string(),
-  id: z.string(),
-  type: z.string(),
-  ephemeral_id: z.string(),
-  version: z.string(),
-}).optional();
-
-export const ElasticsearchObserverSchema = z.object({
-  geo: z.object({
+export const ElasticsearchAgentSchema = z
+  .object({
     name: z.string(),
-  }).optional(),
-  name: z.string(),
-}).optional();
+    id: z.string(),
+    type: z.string(),
+    ephemeral_id: z.string(),
+    version: z.string(),
+  })
+  .optional();
 
-export const ElasticsearchMetaSchema = z.object({
-  space_id: z.string(),
-}).optional();
+export const ElasticsearchObserverSchema = z
+  .object({
+    geo: z
+      .object({
+        name: z.string(),
+      })
+      .optional(),
+    name: z.string(),
+  })
+  .optional();
+
+export const ElasticsearchMetaSchema = z
+  .object({
+    space_id: z.string(),
+  })
+  .optional();
 
 export const ElasticsearchSourceSchema = z.object({
   monitor: ElasticsearchMonitorSchema,
@@ -148,7 +182,6 @@ export const ElasticsearchHitSchema = z.object({
 
 export type ElasticsearchHit = z.infer<typeof ElasticsearchHitSchema>;
 
-
 export const SearchResponseSchema = z.object({
   took: z.number(),
   timed_out: z.boolean(),
@@ -164,25 +197,26 @@ export const SearchResponseSchema = z.object({
       relation: z.string(),
     }),
     max_score: z.number().nullable(),
-    hits: z.array(z.object({
-      _index: z.string(),
-      _id: z.string(),
-      _score: z.number().nullable(),
-      _source: z.any(),
-      sort: z.array(z.number()).optional(),
-    })),
+    hits: z.array(
+      z.object({
+        _index: z.string(),
+        _id: z.string(),
+        _score: z.number().nullable(),
+        _source: z.any(),
+        sort: z.array(z.number()).optional(),
+      }),
+    ),
   }),
 });
 
 export type SearchResponse<T> = z.infer<typeof SearchResponseSchema>;
 
-
 export function validateElasticsearchHits(data: unknown[]): ElasticsearchHit[] {
-  return data.map(hit => ElasticsearchHitSchema.parse(hit));
+  return data.map((hit) => ElasticsearchHitSchema.parse(hit));
 }
 
 export function validateMonitorInfo(data: unknown[]): MonitorInfo[] {
-  return data.map(monitor => MonitorInfoSchema.parse(monitor));
+  return data.map((monitor) => MonitorInfoSchema.parse(monitor));
 }
 
 export function validateBusinessContext(data: unknown): BusinessContext {

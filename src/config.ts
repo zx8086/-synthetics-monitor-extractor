@@ -1,16 +1,16 @@
 import { z } from "zod";
 
-
-const ElasticsearchConfigSchema = z.object({
-  node: z.string().url().min(1).default("https://elasticsearch:9200"),
-  apiKeyId: z.string().optional(),
-  apiKey: z.string().optional(),
-  maxRetries: z.number().min(0).max(10).default(5),
-  requestTimeout: z.number().min(1000).max(60000).default(30000),
-  compression: z.boolean().default(true),
-  sniffOnStart: z.boolean().default(false),
-  rejectUnauthorized: z.boolean().default(true),
-})
+const ElasticsearchConfigSchema = z
+  .object({
+    node: z.string().url().min(1).default("https://elasticsearch:9200"),
+    apiKeyId: z.string().optional(),
+    apiKey: z.string().optional(),
+    maxRetries: z.number().min(0).max(10).default(5),
+    requestTimeout: z.number().min(1000).max(60000).default(30000),
+    compression: z.boolean().default(true),
+    sniffOnStart: z.boolean().default(false),
+    rejectUnauthorized: z.boolean().default(true),
+  })
   .refine(
     (data) => {
       if (data.apiKeyId) {
@@ -24,23 +24,25 @@ const ElasticsearchConfigSchema = z.object({
       return true;
     },
     {
-      message: "Both ELASTIC_API_KEY_ID and ELASTIC_API_KEY must be provided together, or neither for local development",
+      message:
+        "Both ELASTIC_API_KEY_ID and ELASTIC_API_KEY must be provided together, or neither for local development",
       path: ["apiKeyId", "apiKey"],
-    }
+    },
   );
 
-const KafkaConfigSchema = z.object({
-  clientId: z.string().min(1).default("synthetics-extractor"),
-  brokers: z.array(z.string().min(1)).min(1),
-  ssl: z.boolean().default(false),
-  username: z.string().optional(),
-  password: z.string().optional(),
-  connectionTimeout: z.number().min(1000).max(30000).default(3000),
-  authenticationTimeout: z.number().min(1000).max(30000).default(3000),
-  requestTimeout: z.number().min(1000).max(60000).default(30000),
-  initialRetryTime: z.number().min(100).max(10000).default(1000),
-  retries: z.number().min(0).max(20).default(8),
-})
+const KafkaConfigSchema = z
+  .object({
+    clientId: z.string().min(1).default("synthetics-extractor"),
+    brokers: z.array(z.string().min(1)).min(1),
+    ssl: z.boolean().default(false),
+    username: z.string().optional(),
+    password: z.string().optional(),
+    connectionTimeout: z.number().min(1000).max(30000).default(3000),
+    authenticationTimeout: z.number().min(1000).max(30000).default(3000),
+    requestTimeout: z.number().min(1000).max(60000).default(30000),
+    initialRetryTime: z.number().min(100).max(10000).default(1000),
+    retries: z.number().min(0).max(20).default(8),
+  })
   .refine(
     (data) => {
       if (data.ssl) {
@@ -49,9 +51,10 @@ const KafkaConfigSchema = z.object({
       return true;
     },
     {
-      message: "When KAFKA_SSL is enabled, both KAFKA_USERNAME and KAFKA_PASSWORD should be provided",
+      message:
+        "When KAFKA_SSL is enabled, both KAFKA_USERNAME and KAFKA_PASSWORD should be provided",
       path: ["username", "password"],
-    }
+    },
   );
 
 const ExtractionConfigSchema = z.object({
@@ -78,7 +81,6 @@ const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-
 const defaultConfig: Config = {
   elasticsearch: {
     node: "https://elasticsearch:9200",
@@ -90,7 +92,7 @@ const defaultConfig: Config = {
   },
   kafka: {
     clientId: "synthetics-extractor",
-    brokers: ["192.168.178.10:9092"],
+    brokers: ["localhost:9092"],
     ssl: false,
     connectionTimeout: 3000,
     authenticationTimeout: 3000,
@@ -112,7 +114,6 @@ const defaultConfig: Config = {
   },
   nodeEnv: "development",
 };
-
 
 const envVarMapping = {
   elasticsearch: {
@@ -152,68 +153,184 @@ const envVarMapping = {
   nodeEnv: "NODE_ENV",
 } as const;
 
-
-function parseEnvVar(value: string | undefined, type: "string" | "number" | "boolean" | "array"): unknown {
+function parseEnvVar(
+  value: string | undefined,
+  type: "string" | "number" | "boolean" | "array",
+): unknown {
   if (value === undefined) return undefined;
   if (type === "number") return Number(value);
   if (type === "boolean") return value.toLowerCase() === "true";
-  if (type === "array") return value.split(",").map(s => s.trim()).filter(s => s.length > 0);
+  if (type === "array")
+    return value
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
   return value;
 }
 
 function getEnvValue(envVar: string): string | undefined {
-  return (typeof Bun !== "undefined" && Bun.env ? Bun.env[envVar] : undefined) || process.env[envVar];
+  return (
+    (typeof Bun !== "undefined" && Bun.env ? Bun.env[envVar] : undefined) ||
+    process.env[envVar]
+  );
 }
 
 function loadConfigFromEnv(): Partial<Config> {
   const config: Partial<Config> = {};
 
   config.elasticsearch = {
-    node: parseEnvVar(getEnvValue(envVarMapping.elasticsearch.node), "string") as string || defaultConfig.elasticsearch.node,
-    apiKeyId: parseEnvVar(getEnvValue(envVarMapping.elasticsearch.apiKeyId), "string") as string,
-    apiKey: parseEnvVar(getEnvValue(envVarMapping.elasticsearch.apiKey), "string") as string,
-    maxRetries: parseEnvVar(getEnvValue(envVarMapping.elasticsearch.maxRetries), "number") as number || defaultConfig.elasticsearch.maxRetries,
-    requestTimeout: parseEnvVar(getEnvValue(envVarMapping.elasticsearch.requestTimeout), "number") as number || defaultConfig.elasticsearch.requestTimeout,
-    compression: parseEnvVar(getEnvValue(envVarMapping.elasticsearch.compression), "boolean") as boolean ?? defaultConfig.elasticsearch.compression,
-    sniffOnStart: parseEnvVar(getEnvValue(envVarMapping.elasticsearch.sniffOnStart), "boolean") as boolean ?? defaultConfig.elasticsearch.sniffOnStart,
-    rejectUnauthorized: parseEnvVar(getEnvValue(envVarMapping.elasticsearch.rejectUnauthorized), "boolean") as boolean ?? defaultConfig.elasticsearch.rejectUnauthorized,
+    node:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.elasticsearch.node),
+        "string",
+      ) as string) || defaultConfig.elasticsearch.node,
+    apiKeyId: parseEnvVar(
+      getEnvValue(envVarMapping.elasticsearch.apiKeyId),
+      "string",
+    ) as string,
+    apiKey: parseEnvVar(
+      getEnvValue(envVarMapping.elasticsearch.apiKey),
+      "string",
+    ) as string,
+    maxRetries:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.elasticsearch.maxRetries),
+        "number",
+      ) as number) || defaultConfig.elasticsearch.maxRetries,
+    requestTimeout:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.elasticsearch.requestTimeout),
+        "number",
+      ) as number) || defaultConfig.elasticsearch.requestTimeout,
+    compression:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.elasticsearch.compression),
+        "boolean",
+      ) as boolean) ?? defaultConfig.elasticsearch.compression,
+    sniffOnStart:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.elasticsearch.sniffOnStart),
+        "boolean",
+      ) as boolean) ?? defaultConfig.elasticsearch.sniffOnStart,
+    rejectUnauthorized:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.elasticsearch.rejectUnauthorized),
+        "boolean",
+      ) as boolean) ?? defaultConfig.elasticsearch.rejectUnauthorized,
   };
 
-  const kafkaBrokers = parseEnvVar(getEnvValue(envVarMapping.kafka.brokers), "array") as string[] || defaultConfig.kafka.brokers;
+  const kafkaBrokers =
+    (parseEnvVar(
+      getEnvValue(envVarMapping.kafka.brokers),
+      "array",
+    ) as string[]) || defaultConfig.kafka.brokers;
   config.kafka = {
-    clientId: parseEnvVar(getEnvValue(envVarMapping.kafka.clientId), "string") as string || defaultConfig.kafka.clientId,
+    clientId:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.kafka.clientId),
+        "string",
+      ) as string) || defaultConfig.kafka.clientId,
     brokers: kafkaBrokers,
-    ssl: parseEnvVar(getEnvValue(envVarMapping.kafka.ssl), "boolean") as boolean ?? defaultConfig.kafka.ssl,
-    username: parseEnvVar(getEnvValue(envVarMapping.kafka.username), "string") as string,
-    password: parseEnvVar(getEnvValue(envVarMapping.kafka.password), "string") as string,
-    connectionTimeout: parseEnvVar(getEnvValue(envVarMapping.kafka.connectionTimeout), "number") as number || defaultConfig.kafka.connectionTimeout,
-    authenticationTimeout: parseEnvVar(getEnvValue(envVarMapping.kafka.authenticationTimeout), "number") as number || defaultConfig.kafka.authenticationTimeout,
-    requestTimeout: parseEnvVar(getEnvValue(envVarMapping.kafka.requestTimeout), "number") as number || defaultConfig.kafka.requestTimeout,
-    initialRetryTime: parseEnvVar(getEnvValue(envVarMapping.kafka.initialRetryTime), "number") as number || defaultConfig.kafka.initialRetryTime,
-    retries: parseEnvVar(getEnvValue(envVarMapping.kafka.retries), "number") as number || defaultConfig.kafka.retries,
+    ssl:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.kafka.ssl),
+        "boolean",
+      ) as boolean) ?? defaultConfig.kafka.ssl,
+    username: parseEnvVar(
+      getEnvValue(envVarMapping.kafka.username),
+      "string",
+    ) as string,
+    password: parseEnvVar(
+      getEnvValue(envVarMapping.kafka.password),
+      "string",
+    ) as string,
+    connectionTimeout:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.kafka.connectionTimeout),
+        "number",
+      ) as number) || defaultConfig.kafka.connectionTimeout,
+    authenticationTimeout:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.kafka.authenticationTimeout),
+        "number",
+      ) as number) || defaultConfig.kafka.authenticationTimeout,
+    requestTimeout:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.kafka.requestTimeout),
+        "number",
+      ) as number) || defaultConfig.kafka.requestTimeout,
+    initialRetryTime:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.kafka.initialRetryTime),
+        "number",
+      ) as number) || defaultConfig.kafka.initialRetryTime,
+    retries:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.kafka.retries),
+        "number",
+      ) as number) || defaultConfig.kafka.retries,
   };
 
   config.extraction = {
-    intervalMinutes: parseEnvVar(getEnvValue(envVarMapping.extraction.intervalMinutes), "number") as number || defaultConfig.extraction.intervalMinutes,
-    timeRange: parseEnvVar(getEnvValue(envVarMapping.extraction.timeRange), "string") as string || defaultConfig.extraction.timeRange,
-    maxResults: parseEnvVar(getEnvValue(envVarMapping.extraction.maxResults), "number") as number || defaultConfig.extraction.maxResults,
-    timeout: parseEnvVar(getEnvValue(envVarMapping.extraction.timeout), "string") as string || defaultConfig.extraction.timeout,
-    indexPattern: parseEnvVar(getEnvValue(envVarMapping.extraction.indexPattern), "string") as string || defaultConfig.extraction.indexPattern,
+    intervalMinutes:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.extraction.intervalMinutes),
+        "number",
+      ) as number) || defaultConfig.extraction.intervalMinutes,
+    timeRange:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.extraction.timeRange),
+        "string",
+      ) as string) || defaultConfig.extraction.timeRange,
+    maxResults:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.extraction.maxResults),
+        "number",
+      ) as number) || defaultConfig.extraction.maxResults,
+    timeout:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.extraction.timeout),
+        "string",
+      ) as string) || defaultConfig.extraction.timeout,
+    indexPattern:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.extraction.indexPattern),
+        "string",
+      ) as string) || defaultConfig.extraction.indexPattern,
   };
 
   config.logging = {
-    level: parseEnvVar(getEnvValue(envVarMapping.logging.level), "string") as "debug" | "info" | "warn" | "error" || defaultConfig.logging.level,
-    format: parseEnvVar(getEnvValue(envVarMapping.logging.format), "string") as "json" | "text" || defaultConfig.logging.format,
-    includeTimestamp: parseEnvVar(getEnvValue(envVarMapping.logging.includeTimestamp), "boolean") as boolean ?? defaultConfig.logging.includeTimestamp,
+    level:
+      (parseEnvVar(getEnvValue(envVarMapping.logging.level), "string") as
+        | "debug"
+        | "info"
+        | "warn"
+        | "error") || defaultConfig.logging.level,
+    format:
+      (parseEnvVar(getEnvValue(envVarMapping.logging.format), "string") as
+        | "json"
+        | "text") || defaultConfig.logging.format,
+    includeTimestamp:
+      (parseEnvVar(
+        getEnvValue(envVarMapping.logging.includeTimestamp),
+        "boolean",
+      ) as boolean) ?? defaultConfig.logging.includeTimestamp,
   };
 
-  config.nodeEnv = parseEnvVar(getEnvValue(envVarMapping.nodeEnv), "string") as "development" | "production" | "test" || defaultConfig.nodeEnv;
+  config.nodeEnv =
+    (parseEnvVar(getEnvValue(envVarMapping.nodeEnv), "string") as
+      | "development"
+      | "production"
+      | "test") || defaultConfig.nodeEnv;
 
   return config;
 }
 
-
-export function validateEnvironment(): { valid: boolean; errors: string[]; warnings?: string[] } {
+export function validateEnvironment(): {
+  valid: boolean;
+  errors: string[];
+  warnings?: string[];
+} {
   const requiredVars = ["ELASTIC_NODE", "KAFKA_BROKERS"];
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -227,7 +344,7 @@ export function validateEnvironment(): { valid: boolean; errors: string[]; warni
   if (getEnvValue("ELASTIC_NODE")) {
     try {
       const url = new URL(getEnvValue("ELASTIC_NODE")!);
-      if (!url.protocol.startsWith('http')) {
+      if (!url.protocol.startsWith("http")) {
         errors.push("ELASTIC_NODE must use http or https protocol");
       }
     } catch (e) {
@@ -240,7 +357,9 @@ export function validateEnvironment(): { valid: boolean; errors: string[]; warni
     for (const broker of brokers) {
       const trimmed = broker.trim();
       if (!trimmed.includes(":")) {
-        warnings.push(`Kafka broker "${trimmed}" should include port (e.g., host:port)`);
+        warnings.push(
+          `Kafka broker "${trimmed}" should include port (e.g., host:port)`,
+        );
       }
     }
   }
@@ -257,7 +376,9 @@ export function validateEnvironment(): { valid: boolean; errors: string[]; warni
   }
 
   if (!hasElasticApiKeyId && !hasElasticApiKey) {
-    warnings.push("No Elasticsearch authentication configured. This may be fine for local development but should be set for production.");
+    warnings.push(
+      "No Elasticsearch authentication configured. This may be fine for local development but should be set for production.",
+    );
   }
 
   const kafkaSSL = getEnvValue("KAFKA_SSL")?.toLowerCase() === "true";
@@ -265,12 +386,16 @@ export function validateEnvironment(): { valid: boolean; errors: string[]; warni
   const hasKafkaPassword = !!getEnvValue("KAFKA_PASSWORD");
 
   if (kafkaSSL && (!hasKafkaUsername || !hasKafkaPassword)) {
-    warnings.push("KAFKA_SSL is enabled but KAFKA_USERNAME or KAFKA_PASSWORD is missing. This may cause authentication issues.");
+    warnings.push(
+      "KAFKA_SSL is enabled but KAFKA_USERNAME or KAFKA_PASSWORD is missing. This may cause authentication issues.",
+    );
   }
 
   const nodeEnv = getEnvValue("NODE_ENV");
   if (nodeEnv && !["development", "production", "test"].includes(nodeEnv)) {
-    warnings.push(`NODE_ENV value "${nodeEnv}" is not standard. Expected: development, production, or test.`);
+    warnings.push(
+      `NODE_ENV value "${nodeEnv}" is not standard. Expected: development, production, or test.`,
+    );
   }
 
   return {
@@ -280,26 +405,34 @@ export function validateEnvironment(): { valid: boolean; errors: string[]; warni
   };
 }
 
-
 let config: Config;
 
 try {
   const envValidation = validateEnvironment();
   if (!envValidation.valid) {
-    console.error("❌ Environment validation failed:", envValidation.errors.join(', '));
+    console.error(
+      "❌ Environment validation failed:",
+      envValidation.errors.join(", "),
+    );
     if (envValidation.warnings && envValidation.warnings.length > 0) {
-      console.warn("⚠️ Environment warnings:", envValidation.warnings.join(', '));
+      console.warn(
+        "⚠️ Environment warnings:",
+        envValidation.warnings.join(", "),
+      );
     }
     process.exit(1);
   }
 
   if (envValidation.warnings && envValidation.warnings.length > 0) {
-    console.warn("⚠️ Environment warnings:", envValidation.warnings.join(', '));
+    console.warn("⚠️ Environment warnings:", envValidation.warnings.join(", "));
   }
 
   const envConfig = loadConfigFromEnv();
   const mergedConfig = {
-    elasticsearch: { ...defaultConfig.elasticsearch, ...envConfig.elasticsearch },
+    elasticsearch: {
+      ...defaultConfig.elasticsearch,
+      ...envConfig.elasticsearch,
+    },
     kafka: { ...defaultConfig.kafka, ...envConfig.kafka },
     extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
     logging: { ...defaultConfig.logging, ...envConfig.logging },
@@ -308,37 +441,52 @@ try {
 
   config = ConfigSchema.parse(mergedConfig);
 
-  if (config.nodeEnv === "development" || getEnvValue("LOG_CONFIG") === "true") {
-    console.log("✅ Configuration loaded successfully:", JSON.stringify({
-      elasticsearch: {
-        node: config.elasticsearch.node,
-        hasApiKey: !!config.elasticsearch.apiKey,
-        maxRetries: config.elasticsearch.maxRetries,
-        requestTimeout: config.elasticsearch.requestTimeout,
-      },
-      kafka: {
-        clientId: config.kafka.clientId,
-        brokers: config.kafka.brokers,
-        ssl: config.kafka.ssl,
-        hasAuth: !!config.kafka.username,
-      },
-      extraction: {
-        intervalMinutes: config.extraction.intervalMinutes,
-        timeRange: config.extraction.timeRange,
-        indexPattern: config.extraction.indexPattern,
-      },
-      logging: {
-        level: config.logging.level,
-        format: config.logging.format,
-      },
-      nodeEnv: config.nodeEnv,
-    }, null, 2));
+  if (
+    config.nodeEnv === "development" ||
+    getEnvValue("LOG_CONFIG") === "true"
+  ) {
+    console.log(
+      "✅ Configuration loaded successfully:",
+      JSON.stringify(
+        {
+          elasticsearch: {
+            node: config.elasticsearch.node,
+            hasApiKey: !!config.elasticsearch.apiKey,
+            maxRetries: config.elasticsearch.maxRetries,
+            requestTimeout: config.elasticsearch.requestTimeout,
+          },
+          kafka: {
+            clientId: config.kafka.clientId,
+            brokers: config.kafka.brokers,
+            ssl: config.kafka.ssl,
+            hasAuth: !!config.kafka.username,
+          },
+          extraction: {
+            intervalMinutes: config.extraction.intervalMinutes,
+            timeRange: config.extraction.timeRange,
+            indexPattern: config.extraction.indexPattern,
+          },
+          logging: {
+            level: config.logging.level,
+            format: config.logging.format,
+          },
+          nodeEnv: config.nodeEnv,
+        },
+        null,
+        2,
+      ),
+    );
   }
 } catch (error) {
-  console.error("💥 Configuration validation failed:", error instanceof Error ? error.message : String(error));
-  throw new Error("Invalid configuration: " + (error instanceof Error ? error.message : String(error)));
+  console.error(
+    "💥 Configuration validation failed:",
+    error instanceof Error ? error.message : String(error),
+  );
+  throw new Error(
+    "Invalid configuration: " +
+      (error instanceof Error ? error.message : String(error)),
+  );
 }
-
 
 export { config, envVarMapping, defaultConfig };
 
@@ -347,10 +495,16 @@ export function getConfigDocumentation(): Record<string, any> {
     environmentVariables: envVarMapping,
     defaults: defaultConfig,
     schemas: {
-      elasticsearch: ElasticsearchConfigSchema.describe("Elasticsearch connection configuration"),
-      kafka: KafkaConfigSchema.describe("Kafka connection and producer configuration"),
-      extraction: ExtractionConfigSchema.describe("Data extraction and processing configuration"),
+      elasticsearch: ElasticsearchConfigSchema.describe(
+        "Elasticsearch connection configuration",
+      ),
+      kafka: KafkaConfigSchema.describe(
+        "Kafka connection and producer configuration",
+      ),
+      extraction: ExtractionConfigSchema.describe(
+        "Data extraction and processing configuration",
+      ),
       logging: LoggingConfigSchema.describe("Logging configuration"),
-    }
+    },
   };
 }
