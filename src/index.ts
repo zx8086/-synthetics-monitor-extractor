@@ -694,36 +694,38 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
     `Sending ${validatedData.length} messages to topic: monitoring.raw.events`,
   );
   sendPromises.push(
-    producer
-      .send({
-        messages: validatedData.map((item) => {
-          const domain = item.businessContext.domain || "unknown";
-          const timestamp = new Date(item.timestamp).getTime();
-          const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
+    Promise.race([
+      producer
+        .send({
+          messages: validatedData.map((item) => {
+            const domain = item.businessContext.domain || "unknown";
+            const timestamp = new Date(item.timestamp).getTime();
+            const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
 
-          return {
-            topic: "monitoring.raw.events",
-            key: uniqueKey,
-            value: JSON.stringify(item),
-            headers: new Map([
-              ["monitor-type", item.type],
-              ["status", item.status],
-              ["domain", domain],
-              ["department", item.businessContext.department],
-              ["environment", item.environment],
-            ]),
-          };
+            return {
+              topic: "monitoring.raw.events",
+              key: uniqueKey,
+              value: JSON.stringify(item),
+              headers: new Map([
+                ["monitor-type", item.type],
+                ["status", item.status],
+                ["domain", domain],
+                ["department", item.businessContext.department],
+                ["environment", item.environment],
+              ]),
+            };
+          }),
         }),
-      })
-      .then(() => {
-        console.log(`Successfully sent messages to monitoring.raw.events`);
-      })
-      .catch((error: any) => {
-        console.error(
-          `Failed to send messages to monitoring.raw.events:`,
-          error,
-        );
-      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('monitoring.raw.events send timeout after 30 seconds')), 30000)
+      )
+    ])
+    .then(() => {
+      console.log(`Successfully sent messages to monitoring.raw.events`);
+    })
+    .catch((error: any) => {
+      console.error(`Failed to send messages to monitoring.raw.events:`, error.message);
+    }),
   );
 
   // Send to domain-specific topics
@@ -733,29 +735,34 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
     console.log(`Sending ${messages.length} messages to topic: ${topicName}`);
 
     sendPromises.push(
-      producer
-        .send({
-          messages: messages.map(msg => {
-            return {
-              topic: topicName,
-              key: msg.key,
-              value: msg.value,
-              headers: new Map([
-                ["monitor-type", msg.headers["monitor-type"]],
-                ["status", msg.headers["status"]],
-                ["domain", msg.headers["domain"]],
-                ["department", msg.headers["department"]],
-                ["environment", msg.headers["environment"]],
-              ]),
-            };
+      Promise.race([
+        producer
+          .send({
+            messages: messages.map(msg => {
+              return {
+                topic: topicName,
+                key: msg.key,
+                value: msg.value,
+                headers: new Map([
+                  ["monitor-type", msg.headers["monitor-type"]],
+                  ["status", msg.headers["status"]],
+                  ["domain", msg.headers["domain"]],
+                  ["department", msg.headers["department"]],
+                  ["environment", msg.headers["environment"]],
+                ]),
+              };
+            }),
           }),
-        })
-        .then(() => {
-          console.log(`Successfully sent messages to ${topicName}`);
-        })
-        .catch((error: any) => {
-          console.error(`Failed to send messages to ${topicName}:`, error);
-        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error(`${topicName} send timeout after 30 seconds`)), 30000)
+        )
+      ])
+      .then(() => {
+        console.log(`Successfully sent messages to ${topicName}`);
+      })
+      .catch((error: any) => {
+        console.error(`Failed to send messages to ${topicName}:`, error.message);
+      }),
     );
   }
 
