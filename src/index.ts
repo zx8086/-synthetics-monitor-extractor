@@ -287,13 +287,15 @@ async function extractAndProcessMonitors() {
     // Check Elasticsearch connection first
     const isElasticConnected = await checkElasticsearchConnection();
     if (!isElasticConnected) {
-      throw new Error("Failed to connect to Elasticsearch");
+      console.error("❌ Elasticsearch connection failed - skipping this extraction cycle");
+      return;
     }
 
     // Check Kafka connection and list topics
     const isKafkaConnected = await checkKafkaConnection();
     if (!isKafkaConnected) {
-      throw new Error("Failed to connect to Kafka");
+      console.error("❌ Kafka connection failed - skipping this extraction cycle");
+      return;
     }
 
     console.log("Connected to Kafka producer");
@@ -777,7 +779,7 @@ async function startExtractionProcess() {
   
   if (!connectionValidation.valid) {
     console.error("❌ Connection validation failed:", connectionValidation.errors.join(', '));
-    process.exit(1);
+    console.log("⚠️ Continuing with interval setup - connections will be retried during extraction cycles");
   }
   
   if (connectionValidation.warnings && connectionValidation.warnings.length > 0) {
@@ -804,6 +806,8 @@ async function startExtractionProcess() {
       console.error(`❌ Scheduled extraction failed:`, error);
     }
   }, intervalMinutes * 60 * 1000);
+
+  console.log(`✅ Extraction interval set up successfully - will run every ${intervalMinutes} minute(s)`);
 
   // Clean up interval on process termination
   process.on('SIGTERM', () => {
