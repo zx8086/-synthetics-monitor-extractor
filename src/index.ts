@@ -78,30 +78,66 @@ async function checkKafkaConnection() {
       }
     }
 
+    // Get metadata for all topics
     const metadata = await admin.metadata({ topics: [] });
     
-    // Extract topic names from metadata.topics Map
-    const topics = Array.from(metadata.topics.keys());
-    const monitoringTopics = topics.filter((topic: string) =>
-      topic.startsWith("monitoring."),
+    // Debug metadata structure
+    console.log("Metadata structure type check:");
+    console.log("- topics is Map?", metadata.topics instanceof Map);
+    console.log("- topics type:", typeof metadata.topics);
+    
+    let topics: string[] = [];
+    let monitoringTopics: string[] = [];
+    
+    // Try different approaches to extract topics
+    if (metadata.topics instanceof Map) {
+      // If topics is a Map, use keys()
+      topics = Array.from(metadata.topics.keys());
+    } else if (typeof metadata.topics === 'object') {
+      // If topics is a plain object, use Object.keys
+      topics = Object.keys(metadata.topics);
+    }
+    
+    console.log("All topic names:", topics);
+    
+    // Filter for monitoring topics
+    monitoringTopics = topics.filter(topic => 
+      typeof topic === 'string' && topic.startsWith('monitoring.')
     );
-
+    
     console.log("📋 Available monitoring topics:", monitoringTopics);
-
-    console.log("📊 Monitoring topic details:");
-    monitoringTopics.forEach((topicName: string) => {
-      const topicMetadata = metadata.topics.get(topicName);
-      if (topicMetadata) {
-        console.log(`  - ${topicName}:`);
-        console.log(`    Partitions: ${topicMetadata.partitions.length}`);
-        console.log(
-          `    Replication Factor: ${topicMetadata.partitions[0]?.replicas.length || "unknown"}`,
-        );
+    
+    // Try to get details for each monitoring topic
+    console.log("📊 Attempting to get monitoring topic details:");
+    for (const topicName of monitoringTopics) {
+      try {
+        // Try different approaches to get topic metadata
+        let topicMetadata;
+        if (metadata.topics instanceof Map) {
+          topicMetadata = metadata.topics.get(topicName);
+        } else if (typeof metadata.topics === 'object') {
+          topicMetadata = metadata.topics[topicName];
+        }
+        
+        if (topicMetadata) {
+          console.log(`  - ${topicName}:`);
+          if (topicMetadata.partitions) {
+            console.log(`    Partitions: ${topicMetadata.partitions.length}`);
+            if (topicMetadata.partitions.length > 0 && topicMetadata.partitions[0]?.replicas) {
+              console.log(`    Replication Factor: ${topicMetadata.partitions[0].replicas.length || "unknown"}`);
+            }
+          } else {
+            console.log(`    Metadata structure: ${JSON.stringify(topicMetadata, null, 2).substring(0, 100)}...`);
+          }
+        } else {
+          console.log(`  - ${topicName}: No detailed metadata available`);
+        }
+      } catch (err: any) {
+        console.log(`  - ${topicName}: Error getting details:`, err.message);
       }
-    });
+    }
 
     await admin.close();
-
     return true;
   } catch (error: any) {
     console.error("❌ Failed to connect to Kafka");
