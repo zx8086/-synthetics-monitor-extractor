@@ -785,6 +785,7 @@ async function startExtractionProcess() {
   }
 
   // Initial run
+  console.log("Running initial data extraction...");
   await extractAndProcessMonitors();
 
   // Set up interval for regular extraction
@@ -793,7 +794,22 @@ async function startExtractionProcess() {
     `Setting up extraction to run every ${intervalMinutes} minute(s)`,
   );
 
-  setInterval(extractAndProcessMonitors, intervalMinutes * 60 * 1000);
+  // Store the interval ID so we can clear it if needed
+  const intervalId = setInterval(async () => {
+    console.log(`\n🕒 Running scheduled extraction (every ${intervalMinutes} minutes)...`);
+    try {
+      await extractAndProcessMonitors();
+      console.log(`✅ Scheduled extraction completed successfully`);
+    } catch (error) {
+      console.error(`❌ Scheduled extraction failed:`, error);
+    }
+  }, intervalMinutes * 60 * 1000);
+
+  // Clean up interval on process termination
+  process.on('SIGTERM', () => {
+    console.log('Clearing extraction interval...');
+    clearInterval(intervalId);
+  });
 }
 
 // Clean shutdown handler
