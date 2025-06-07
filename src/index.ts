@@ -111,16 +111,21 @@ let elasticClientInstance: Client | null = null;
 function getElasticsearchClient(): Client {
   if (!elasticClientInstance) {
     console.log("Creating new Elasticsearch client instance");
-    
-    const clientConfig: any = {
+    elasticClientInstance = new Client({
       node: config.elasticsearch.node,
+      auth: {
+        apiKey: {
+          id: config.elasticsearch.apiKeyId || "",
+          api_key: config.elasticsearch.apiKey || "",
+        },
+      },
       Connection: HttpConnection,
       compression: config.elasticsearch.compression,
       maxRetries: config.elasticsearch.maxRetries,
       requestTimeout: config.elasticsearch.requestTimeout,
       sniffOnStart: config.elasticsearch.sniffOnStart,
-      name: "synthetics-extractor",
-      opaqueIdPrefix: "synthetics-extractor::",
+      name: config.elasticsearch.name,
+      opaqueIdPrefix: config.elasticsearch.opaqueIdPrefix,
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
@@ -136,18 +141,7 @@ function getElasticsearchClient(): Client {
       tls: {
         rejectUnauthorized: config.elasticsearch.rejectUnauthorized,
       },
-    };
-
-    if (config.elasticsearch.apiKeyId && config.elasticsearch.apiKey) {
-      clientConfig.auth = {
-        apiKey: {
-          id: config.elasticsearch.apiKeyId,
-          api_key: config.elasticsearch.apiKey,
-        },
-      };
-    }
-
-    elasticClientInstance = new Client(clientConfig);
+    });
   }
   return elasticClientInstance;
 }
@@ -289,7 +283,7 @@ async function fetchAllMonitorData() {
           must: [
             {
               wildcard: {
-                "monitor.name": "*",
+                "monitor.name": config.extraction.monitorNamePattern,
               },
             },
             {

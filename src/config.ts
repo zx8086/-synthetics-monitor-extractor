@@ -10,6 +10,8 @@ const ElasticsearchConfigSchema = z
     compression: z.boolean().default(true),
     sniffOnStart: z.boolean().default(false),
     rejectUnauthorized: z.boolean().default(true),
+    name: z.string().default("synthetics-extractor"),
+    opaqueIdPrefix: z.string().default("synthetics-extractor::"),
   })
   .refine(
     (data) => {
@@ -63,6 +65,7 @@ const ExtractionConfigSchema = z.object({
   maxResults: z.number().min(1).max(10000).default(1000),
   timeout: z.string().default("30s"),
   indexPattern: z.string().default("synthetics-*"),
+  monitorNamePattern: z.string().default("*"),
 });
 
 const LoggingConfigSchema = z.object({
@@ -89,6 +92,8 @@ const defaultConfig: Config = {
     compression: true,
     sniffOnStart: false,
     rejectUnauthorized: true,
+    name: "synthetics-extractor",
+    opaqueIdPrefix: "synthetics-extractor::",
   },
   kafka: {
     clientId: "synthetics-extractor",
@@ -106,6 +111,7 @@ const defaultConfig: Config = {
     maxResults: 1000,
     timeout: "30s",
     indexPattern: "synthetics-*",
+    monitorNamePattern: "*",
   },
   logging: {
     level: "info",
@@ -125,6 +131,8 @@ const envVarMapping = {
     compression: "ELASTIC_COMPRESSION",
     sniffOnStart: "ELASTIC_SNIFF_ON_START",
     rejectUnauthorized: "ELASTIC_REJECT_UNAUTHORIZED",
+    name: "ELASTIC_NAME",
+    opaqueIdPrefix: "ELASTIC_OPAQUE_ID_PREFIX",
   },
   kafka: {
     clientId: "KAFKA_CLIENT_ID",
@@ -144,6 +152,7 @@ const envVarMapping = {
     maxResults: "EXTRACTION_MAX_RESULTS",
     timeout: "EXTRACTION_TIMEOUT",
     indexPattern: "EXTRACTION_INDEX_PATTERN",
+    monitorNamePattern: "EXTRACTION_MONITOR_NAME_PATTERN",
   },
   logging: {
     level: "LOG_LEVEL",
@@ -176,154 +185,78 @@ function getEnvValue(envVar: string): string | undefined {
 }
 
 function loadConfigFromEnv(): Partial<Config> {
-  const config: Partial<Config> = {};
+  const envConfig: Record<string, any> = {};
 
-  config.elasticsearch = {
-    node:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.elasticsearch.node),
-        "string",
-      ) as string) || defaultConfig.elasticsearch.node,
-    apiKeyId: parseEnvVar(
-      getEnvValue(envVarMapping.elasticsearch.apiKeyId),
-      "string",
-    ) as string,
-    apiKey: parseEnvVar(
-      getEnvValue(envVarMapping.elasticsearch.apiKey),
-      "string",
-    ) as string,
-    maxRetries:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.elasticsearch.maxRetries),
-        "number",
-      ) as number) || defaultConfig.elasticsearch.maxRetries,
-    requestTimeout:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.elasticsearch.requestTimeout),
-        "number",
-      ) as number) || defaultConfig.elasticsearch.requestTimeout,
-    compression:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.elasticsearch.compression),
-        "boolean",
-      ) as boolean) ?? defaultConfig.elasticsearch.compression,
-    sniffOnStart:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.elasticsearch.sniffOnStart),
-        "boolean",
-      ) as boolean) ?? defaultConfig.elasticsearch.sniffOnStart,
-    rejectUnauthorized:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.elasticsearch.rejectUnauthorized),
-        "boolean",
-      ) as boolean) ?? defaultConfig.elasticsearch.rejectUnauthorized,
+  // Helper function to safely parse environment variables
+  const getEnvConfig = (key: string, type: "string" | "number" | "boolean" | "array") => {
+    const value = getEnvValue(key);
+    if (value === undefined) return undefined;
+    return parseEnvVar(value, type);
   };
 
-  const kafkaBrokers =
-    (parseEnvVar(
-      getEnvValue(envVarMapping.kafka.brokers),
-      "array",
-    ) as string[]) || defaultConfig.kafka.brokers;
-  config.kafka = {
-    clientId:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.kafka.clientId),
-        "string",
-      ) as string) || defaultConfig.kafka.clientId,
-    brokers: kafkaBrokers,
-    ssl:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.kafka.ssl),
-        "boolean",
-      ) as boolean) ?? defaultConfig.kafka.ssl,
-    username: parseEnvVar(
-      getEnvValue(envVarMapping.kafka.username),
-      "string",
-    ) as string,
-    password: parseEnvVar(
-      getEnvValue(envVarMapping.kafka.password),
-      "string",
-    ) as string,
-    connectionTimeout:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.kafka.connectionTimeout),
-        "number",
-      ) as number) || defaultConfig.kafka.connectionTimeout,
-    authenticationTimeout:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.kafka.authenticationTimeout),
-        "number",
-      ) as number) || defaultConfig.kafka.authenticationTimeout,
-    requestTimeout:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.kafka.requestTimeout),
-        "number",
-      ) as number) || defaultConfig.kafka.requestTimeout,
-    initialRetryTime:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.kafka.initialRetryTime),
-        "number",
-      ) as number) || defaultConfig.kafka.initialRetryTime,
-    retries:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.kafka.retries),
-        "number",
-      ) as number) || defaultConfig.kafka.retries,
+  // Load Elasticsearch config
+  envConfig.elasticsearch = {
+    node: getEnvConfig(envVarMapping.elasticsearch.node, "string"),
+    apiKeyId: getEnvConfig(envVarMapping.elasticsearch.apiKeyId, "string"),
+    apiKey: getEnvConfig(envVarMapping.elasticsearch.apiKey, "string"),
+    maxRetries: getEnvConfig(envVarMapping.elasticsearch.maxRetries, "number"),
+    requestTimeout: getEnvConfig(envVarMapping.elasticsearch.requestTimeout, "number"),
+    compression: getEnvConfig(envVarMapping.elasticsearch.compression, "boolean"),
+    sniffOnStart: getEnvConfig(envVarMapping.elasticsearch.sniffOnStart, "boolean"),
+    rejectUnauthorized: getEnvConfig(envVarMapping.elasticsearch.rejectUnauthorized, "boolean"),
+    name: getEnvConfig(envVarMapping.elasticsearch.name, "string"),
+    opaqueIdPrefix: getEnvConfig(envVarMapping.elasticsearch.opaqueIdPrefix, "string"),
   };
 
-  config.extraction = {
-    intervalMinutes:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.extraction.intervalMinutes),
-        "number",
-      ) as number) || defaultConfig.extraction.intervalMinutes,
-    timeRange:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.extraction.timeRange),
-        "string",
-      ) as string) || defaultConfig.extraction.timeRange,
-    maxResults:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.extraction.maxResults),
-        "number",
-      ) as number) || defaultConfig.extraction.maxResults,
-    timeout:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.extraction.timeout),
-        "string",
-      ) as string) || defaultConfig.extraction.timeout,
-    indexPattern:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.extraction.indexPattern),
-        "string",
-      ) as string) || defaultConfig.extraction.indexPattern,
+  // Load Kafka config
+  envConfig.kafka = {
+    clientId: getEnvConfig(envVarMapping.kafka.clientId, "string"),
+    brokers: getEnvConfig(envVarMapping.kafka.brokers, "array"),
+    ssl: getEnvConfig(envVarMapping.kafka.ssl, "boolean"),
+    username: getEnvConfig(envVarMapping.kafka.username, "string"),
+    password: getEnvConfig(envVarMapping.kafka.password, "string"),
+    connectionTimeout: getEnvConfig(envVarMapping.kafka.connectionTimeout, "number"),
+    authenticationTimeout: getEnvConfig(envVarMapping.kafka.authenticationTimeout, "number"),
+    requestTimeout: getEnvConfig(envVarMapping.kafka.requestTimeout, "number"),
+    initialRetryTime: getEnvConfig(envVarMapping.kafka.initialRetryTime, "number"),
+    retries: getEnvConfig(envVarMapping.kafka.retries, "number"),
   };
 
-  config.logging = {
-    level:
-      (parseEnvVar(getEnvValue(envVarMapping.logging.level), "string") as
-        | "debug"
-        | "info"
-        | "warn"
-        | "error") || defaultConfig.logging.level,
-    format:
-      (parseEnvVar(getEnvValue(envVarMapping.logging.format), "string") as
-        | "json"
-        | "text") || defaultConfig.logging.format,
-    includeTimestamp:
-      (parseEnvVar(
-        getEnvValue(envVarMapping.logging.includeTimestamp),
-        "boolean",
-      ) as boolean) ?? defaultConfig.logging.includeTimestamp,
+  // Load Extraction config
+  envConfig.extraction = {
+    intervalMinutes: getEnvConfig(envVarMapping.extraction.intervalMinutes, "number"),
+    timeRange: getEnvConfig(envVarMapping.extraction.timeRange, "string"),
+    maxResults: getEnvConfig(envVarMapping.extraction.maxResults, "number"),
+    timeout: getEnvConfig(envVarMapping.extraction.timeout, "string"),
+    indexPattern: getEnvConfig(envVarMapping.extraction.indexPattern, "string"),
+    monitorNamePattern: getEnvConfig(envVarMapping.extraction.monitorNamePattern, "string"),
   };
 
-  config.nodeEnv =
-    (parseEnvVar(getEnvValue(envVarMapping.nodeEnv), "string") as
-      | "development"
-      | "production"
-      | "test") || defaultConfig.nodeEnv;
+  // Load Logging config
+  envConfig.logging = {
+    level: getEnvConfig(envVarMapping.logging.level, "string"),
+    format: getEnvConfig(envVarMapping.logging.format, "string"),
+    includeTimestamp: getEnvConfig(envVarMapping.logging.includeTimestamp, "boolean"),
+  };
 
-  return config;
+  // Load NodeEnv
+  envConfig.nodeEnv = getEnvConfig(envVarMapping.nodeEnv, "string");
+
+  // Use Zod to validate and transform the config
+  const result = ConfigSchema.safeParse({
+    elasticsearch: { ...defaultConfig.elasticsearch, ...envConfig.elasticsearch },
+    kafka: { ...defaultConfig.kafka, ...envConfig.kafka },
+    extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
+    logging: { ...defaultConfig.logging, ...envConfig.logging },
+    nodeEnv: envConfig.nodeEnv || defaultConfig.nodeEnv,
+  });
+
+  if (!result.success) {
+    console.error("Configuration validation failed:", result.error.format());
+    throw new Error("Invalid configuration: " + JSON.stringify(result.error.format(), null, 2));
+  }
+
+  return result.data;
 }
 
 export function validateEnvironment(): {
