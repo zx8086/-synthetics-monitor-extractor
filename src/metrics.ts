@@ -2,8 +2,6 @@ import * as promClient from 'prom-client';
 import { config } from './config.js';
 
 export let registry: promClient.Registry;
-export let kafkaProducedMessagesCounter: promClient.Counter;
-export let kafkaProducerErrorsCounter: promClient.Counter;
 export let kafkaMessageSizeHistogram: promClient.Histogram;
 
 export function initializeMetrics() {
@@ -12,20 +10,6 @@ export function initializeMetrics() {
   promClient.collectDefaultMetrics({
     register: registry,
     prefix: config.metrics.prefix,
-  });
-
-  kafkaProducedMessagesCounter = new promClient.Counter({
-    name: 'kafka_produced_messages',
-    help: 'Number of produced Kafka messages',
-    labelNames: ['topic', 'status'],
-    registers: [registry],
-  });
-
-  kafkaProducerErrorsCounter = new promClient.Counter({
-    name: 'kafka_producer_errors',
-    help: 'Number of Kafka producer errors',
-    labelNames: ['topic', 'error_type'],
-    registers: [registry],
   });
 
   kafkaMessageSizeHistogram = new promClient.Histogram({

@@ -20,8 +20,6 @@ import {
   initializeMetrics, 
   startMetricsServer, 
   registry,
-  kafkaProducedMessagesCounter,
-  kafkaProducerErrorsCounter,
   kafkaMessageSizeHistogram
 } from './metrics';
 
@@ -31,10 +29,6 @@ const producer = new Producer({
   clientId: config.kafka.clientId,
   bootstrapBrokers: config.kafka.brokers,
   serializers: stringSerializers,
-  metrics: { 
-    client: promClient, 
-    registry: registry 
-  },
   ...(config.kafka.ssl && {
     tls: {
       rejectUnauthorized: true,
@@ -663,7 +657,7 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
     }
 
     messagesByDomain[domainKey].push({
-      key: uniqueKey, // Use the unique key here
+      key: uniqueKey,
       value: JSON.stringify(item),
       headers: {
         "monitor-type": item.type,
@@ -677,6 +671,21 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
 
   console.log("Messages grouped by domain:", Object.keys(messagesByDomain));
 
+  if (config.metrics.enabled) {
+    validatedData.forEach((item) => {
+      const messageSize = Buffer.byteLength(JSON.stringify(item));
+      kafkaMessageSizeHistogram.observe({ topic: "monitoring.raw.events" }, messageSize);
+    });
+    
+    for (const [domain, messages] of Object.entries(messagesByDomain)) {
+      const topicName = `monitoring.${domain.toLowerCase().replace(/[^a-z0-9]/g, "-")}.events`;
+      messages.forEach(msg => {
+        const messageSize = Buffer.byteLength(msg.value);
+        kafkaMessageSizeHistogram.observe({ topic: topicName }, messageSize);
+      });
+    }
+  }
+
   // Send to domain-specific topics and the raw events topic
   const sendPromises = [];
 
@@ -685,42 +694,38 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
     `Sending ${validatedData.length} messages to topic: monitoring.raw.events`,
   );
   sendPromises.push(
-    producer
-      .send({
-        messages: validatedData.map((item) => {
-          const domain = item.businessContext.domain || "unknown";
-          const timestamp = new Date(item.timestamp).getTime();
-          const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
-          const messageSize = Buffer.byteLength(JSON.stringify(item));
-          
-          kafkaMessageSizeHistogram.observe({ topic: "monitoring.raw.events" }, messageSize);
+    Promise.race([
+      producer
+        .send({
+          messages: validatedData.map((item) => {
+            const domain = item.businessContext.domain || "unknown";
+            const timestamp = new Date(item.timestamp).getTime();
+            const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
 
-          return {
-            topic: "monitoring.raw.events",
-            key: uniqueKey,
-            value: JSON.stringify(item),
-            headers: new Map([
-              ["monitor-type", item.type],
-              ["status", item.status],
-              ["domain", domain],
-              ["department", item.businessContext.department],
-              ["environment", item.environment],
-            ]),
-          };
+            return {
+              topic: "monitoring.raw.events",
+              key: uniqueKey,
+              value: JSON.stringify(item),
+              headers: new Map([
+                ["monitor-type", item.type],
+                ["status", item.status],
+                ["domain", domain],
+                ["department", item.businessContext.department],
+                ["environment", item.environment],
+              ]),
+            };
+          }),
         }),
-      })
-      .then(() => {
-        kafkaProducedMessagesCounter.inc({ topic: "monitoring.raw.events", status: 'success' }, validatedData.length);
-        console.log(`Successfully sent messages to monitoring.raw.events`);
-      })
-      .catch((error: any) => {
-        kafkaProducerErrorsCounter.inc({ topic: "monitoring.raw.events", error_type: 'send_failure' });
-        kafkaProducedMessagesCounter.inc({ topic: "monitoring.raw.events", status: 'error' }, validatedData.length);
-        console.error(
-          `Failed to send messages to monitoring.raw.events:`,
-          error,
-        );
-      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('monitoring.raw.events send timeout after 30 seconds')), 30000)
+      )
+    ])
+    .then(() => {
+      console.log(`Successfully sent messages to monitoring.raw.events`);
+    })
+    .catch((error: any) => {
+      console.error(`Failed to send messages to monitoring.raw.events:`, error.message);
+    }),
   );
 
   // Send to domain-specific topics
@@ -730,40 +735,50 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
     console.log(`Sending ${messages.length} messages to topic: ${topicName}`);
 
     sendPromises.push(
-      producer
-        .send({
-          messages: messages.map(msg => {
-            const messageSize = Buffer.byteLength(msg.value);
-            kafkaMessageSizeHistogram.observe({ topic: topicName }, messageSize);
-            
-            return {
-              topic: topicName,
-              key: msg.key,
-              value: msg.value,
-              headers: new Map([
-                ["monitor-type", msg.headers["monitor-type"]],
-                ["status", msg.headers["status"]],
-                ["domain", msg.headers["domain"]],
-                ["department", msg.headers["department"]],
-                ["environment", msg.headers["environment"]],
-              ]),
-            };
+      Promise.race([
+        producer
+          .send({
+            messages: messages.map(msg => {
+              return {
+                topic: topicName,
+                key: msg.key,
+                value: msg.value,
+                headers: new Map([
+                  ["monitor-type", msg.headers["monitor-type"]],
+                  ["status", msg.headers["status"]],
+                  ["domain", msg.headers["domain"]],
+                  ["department", msg.headers["department"]],
+                  ["environment", msg.headers["environment"]],
+                ]),
+              };
+            }),
           }),
-        })
-        .then(() => {
-          kafkaProducedMessagesCounter.inc({ topic: topicName, status: 'success' }, messages.length);
-          console.log(`Successfully sent messages to ${topicName}`);
-        })
-        .catch((error: any) => {
-          kafkaProducerErrorsCounter.inc({ topic: topicName, error_type: 'send_failure' });
-          kafkaProducedMessagesCounter.inc({ topic: topicName, status: 'error' }, messages.length);
-          console.error(`Failed to send messages to ${topicName}:`, error);
-        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error(`${topicName} send timeout after 30 seconds`)), 30000)
+        )
+      ])
+      .then(() => {
+        console.log(`Successfully sent messages to ${topicName}`);
+      })
+      .catch((error: any) => {
+        console.error(`Failed to send messages to ${topicName}:`, error.message);
+      }),
     );
   }
 
   try {
-    await Promise.all(sendPromises);
+    const results = await Promise.allSettled(sendPromises);
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
+    console.log(`Successfully sent ${successful}/${sendPromises.length} message batches to Kafka`);
+    if (failed > 0) {
+      console.warn(`${failed} message batches failed to send`);
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`Batch ${index} failed:`, result.reason);
+        }
+      });
+    }
     console.log(
       `Successfully sent ${validatedData.length} messages to Kafka`,
     );
