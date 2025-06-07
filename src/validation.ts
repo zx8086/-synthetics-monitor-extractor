@@ -43,7 +43,7 @@ export async function checkElasticsearchConnection(): Promise<ValidationResult> 
     }
 
     const serverVersion = info.version?.number || "0.0.0";
-    const majorVersion = parseInt(serverVersion.split('.')[0]);
+    const majorVersion = parseInt(serverVersion.split('.')[0] || "0");
     
     if (majorVersion >= 9) {
       warnings.push(`Server version ${serverVersion} detected - using modern Elasticsearch features`);
