@@ -21,6 +21,12 @@ import {
   registry,
   kafkaMessageSizeHistogram
 } from './metrics';
+import { 
+  getElasticsearchClient, 
+  executeSearch, 
+  closeElasticsearchClient,
+  checkElasticsearchHealth
+} from "./elasticsearch.js";
 
 initializeMetrics();
 
@@ -157,47 +163,6 @@ async function checkKafkaConnection() {
   }
 }
 
-// Create a singleton Elasticsearch client
-let elasticClientInstance: Client | null = null;
-
-function getElasticsearchClient(): Client {
-  if (!elasticClientInstance) {
-    console.log("Creating new Elasticsearch client instance");
-    elasticClientInstance = new Client({
-      node: config.elasticsearch.node,
-      auth: {
-        apiKey: {
-          id: config.elasticsearch.apiKeyId || "",
-          api_key: config.elasticsearch.apiKey || "",
-        },
-      },
-      Connection: HttpConnection,
-      compression: config.elasticsearch.compression,
-      maxRetries: config.elasticsearch.maxRetries,
-      requestTimeout: config.elasticsearch.requestTimeout,
-      sniffOnStart: config.elasticsearch.sniffOnStart,
-      name: config.elasticsearch.name,
-      opaqueIdPrefix: config.elasticsearch.opaqueIdPrefix,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "Accept-Encoding": "gzip, deflate",
-      },
-      context: {
-        userAgent: "synthetics-extractor/1.0.0 (bun)",
-      },
-      redaction: {
-        type: "replace",
-        additionalKeys: ["authorization", "x-elastic-client-meta"],
-      },
-      tls: {
-        rejectUnauthorized: config.elasticsearch.rejectUnauthorized,
-      },
-    });
-  }
-  return elasticClientInstance;
-}
-
 // Check Elasticsearch connection with retry logic
 async function checkElasticsearchConnection() {
   const maxRetries = 3;
@@ -205,16 +170,15 @@ async function checkElasticsearchConnection() {
 
   while (retries > 0) {
     try {
-      const client = getElasticsearchClient();
       console.log(
-        `Attempting to connect to Elasticsearch (${maxRetries - retries + 1}/${maxRetries})...`,
+        `Checking Elasticsearch connection (${maxRetries - retries + 1}/${maxRetries})...`,
       );
 
-      // Use a simple ping request instead of info() for initial connection test
-      const pingResponse = await client.ping();
-
-      if (pingResponse) {
-        // If ping succeeds, then get cluster info
+      const isHealthy = await checkElasticsearchHealth();
+      
+      if (isHealthy) {
+        // Get cluster info
+        const client = getElasticsearchClient();
         const info = await client.info();
 
         console.log("✅ Successfully connected to Elasticsearch", {
@@ -256,18 +220,12 @@ async function checkElasticsearchConnection() {
         if (error?.meta?.body) {
           console.error("Response:", error.meta.body);
         }
-        if (error?.meta?.statusCode) {
-          console.error("Status code:", error.meta.statusCode);
-        }
-        if (error?.meta?.headers) {
-          console.error("Response headers:", error.meta.headers);
-        }
         return false;
       }
       console.log(
         `Retrying Elasticsearch connection... (${retries} attempts remaining)`,
       );
-      await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds between retries
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   }
   return false;
@@ -278,9 +236,11 @@ async function extractAndProcessMonitors() {
   try {
     console.log("Starting synthetic monitor data extraction...");
 
-    // Check Elasticsearch connection first
-    const isElasticConnected = await checkElasticsearchConnection();
-    if (!isElasticConnected) {
+    // Only check connection if we haven't established one yet
+    const client = getElasticsearchClient();
+    const isHealthy = await checkElasticsearchHealth();
+    
+    if (!isHealthy) {
       console.error("❌ Elasticsearch connection failed - skipping this extraction cycle");
       return;
     }
@@ -320,7 +280,6 @@ async function extractAndProcessMonitors() {
 async function fetchAllMonitorData() {
   const timeRange = config.extraction.timeRange;
   const size = config.extraction.maxResults;
-  const client = getElasticsearchClient();
 
   try {
     // Build the query to get all synthetic monitors
@@ -356,24 +315,10 @@ async function fetchAllMonitorData() {
       size,
       index: config.extraction.indexPattern,
     });
-    console.log("Full query:", JSON.stringify(query, null, 2));
-
-    // Execute the search with timeout handling
-    const response = await client
-      .search<ElasticsearchHit["_source"]>(query)
-      .catch((error) => {
-        if (error.name === "TimeoutError") {
-          console.error(
-            "Elasticsearch query timed out. Retrying with longer timeout...",
-          );
-          // Retry with longer timeout
-          return client.search<ElasticsearchHit["_source"]>({
-            ...query,
-            timeout: "120s",
-          });
-        }
-        throw error;
-      });
+    
+    // Use the client directly for more complex operations
+    const client = getElasticsearchClient();
+    const response = await client.search<ElasticsearchHit["_source"]>(query);
 
     console.log("Query response:", {
       total: response.hits.total,
@@ -753,6 +698,7 @@ async function startExtractionProcess() {
   console.log("🚀 Starting synthetics monitor extractor...");
   
   try {
+    // Initial connection validation
     const connectionValidation = await validateConnections();
     
     if (!connectionValidation.valid) {
@@ -798,14 +744,15 @@ async function startExtractionProcess() {
   }
 }
 
-// Clean shutdown handler
+// Ensure clean shutdown
 process.on("SIGTERM", async () => {
   console.log("Received SIGTERM, shutting down gracefully");
   try {
+    await closeElasticsearchClient();
     await producer.close();
-    console.log("Producer closed successfully");
+    console.log("All connections closed successfully");
   } catch (error) {
-    console.error("Error closing producer:", error);
+    console.error("Error during shutdown:", error);
   }
   process.exit(0);
 });
