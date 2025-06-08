@@ -1,3 +1,5 @@
+/* src/metrics.ts */
+
 import * as promClient from 'prom-client';
 import { config } from './config.js';
 

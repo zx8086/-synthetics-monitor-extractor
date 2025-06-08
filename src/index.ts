@@ -1,9 +1,8 @@
 /* src/index.ts */
 
 import { Client, estypes } from "@elastic/elasticsearch";
-import { Producer, Admin, stringSerializers } from "@platformatic/kafka";
+import { Producer, Admin, stringSerializers, ProduceAcks } from "@platformatic/kafka";
 import { HttpConnection } from "@elastic/transport";
-import * as promClient from 'prom-client';
 import {
   type BusinessContext,
   type ServiceInfo,
@@ -25,6 +24,7 @@ import {
 
 initializeMetrics();
 
+// Create producer with proper configuration
 const producer = new Producer({
   clientId: config.kafka.clientId,
   bootstrapBrokers: config.kafka.brokers,
@@ -686,172 +686,141 @@ async function sendToKafka(transformedData: MonitorInfo[]) {
     }
   }
 
-  // Send to domain-specific topics and the raw events topic
-  const sendPromises = [];
-
-  // Send to raw events topic
-  console.log(
-    `Sending ${validatedData.length} messages to topic: monitoring.raw.events`,
-  );
-  sendPromises.push(
-    Promise.race([
-      producer
-        .send({
-          messages: validatedData.map((item) => {
-            const domain = item.businessContext.domain || "unknown";
-            const timestamp = new Date(item.timestamp).getTime();
-            const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
-
-            return {
-              topic: "monitoring.raw.events",
-              key: uniqueKey,
-              value: JSON.stringify(item),
-              headers: new Map([
-                ["monitor-type", item.type],
-                ["status", item.status],
-                ["domain", domain],
-                ["department", item.businessContext.department],
-                ["environment", item.environment],
-              ]),
-            };
-          }),
-        }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('monitoring.raw.events send timeout after 30 seconds')), 30000)
-      )
-    ])
-    .then(() => {
-      console.log(`Successfully sent messages to monitoring.raw.events`);
-    })
-    .catch((error: any) => {
-      console.error(`Failed to send messages to monitoring.raw.events:`, error.message);
-    }),
-  );
-
-  // Send to domain-specific topics
-  for (const [domain, messages] of Object.entries(messagesByDomain)) {
-    // Create a valid Kafka topic name (lowercase, replace spaces/special chars)
-    const topicName = `monitoring.${domain.toLowerCase().replace(/[^a-z0-9]/g, "-")}.events`;
-    console.log(`Sending ${messages.length} messages to topic: ${topicName}`);
-
-    sendPromises.push(
-      Promise.race([
-        producer
-          .send({
-            messages: messages.map(msg => {
-              return {
-                topic: topicName,
-                key: msg.key,
-                value: msg.value,
-                headers: new Map([
-                  ["monitor-type", msg.headers["monitor-type"]],
-                  ["status", msg.headers["status"]],
-                  ["domain", msg.headers["domain"]],
-                  ["department", msg.headers["department"]],
-                  ["environment", msg.headers["environment"]],
-                ]),
-              };
-            }),
-          }),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error(`${topicName} send timeout after 30 seconds`)), 30000)
-        )
-      ])
-      .then(() => {
-        console.log(`Successfully sent messages to ${topicName}`);
-      })
-      .catch((error: any) => {
-        console.error(`Failed to send messages to ${topicName}:`, error.message);
-      }),
-    );
-  }
-
   try {
-    const results = await Promise.allSettled(sendPromises);
-    const successful = results.filter(r => r.status === 'fulfilled').length;
-    const failed = results.filter(r => r.status === 'rejected').length;
-    console.log(`Successfully sent ${successful}/${sendPromises.length} message batches to Kafka`);
-    if (failed > 0) {
-      console.warn(`${failed} message batches failed to send`);
-      results.forEach((result, index) => {
-        if (result.status === 'rejected') {
-          console.error(`Batch ${index} failed:`, result.reason);
-        }
+    // Send to raw events topic first
+    console.log(`Sending ${validatedData.length} messages to topic: monitoring.raw.events`);
+    await producer.send({
+      messages: validatedData.map((item) => {
+        const domain = item.businessContext.domain || "unknown";
+        const timestamp = new Date(item.timestamp).getTime();
+        const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
+
+        return {
+          topic: "monitoring.raw.events",
+          key: uniqueKey,
+          value: JSON.stringify(item),
+          headers: new Map([
+            ["monitor-type", item.type],
+            ["status", item.status],
+            ["domain", domain],
+            ["department", item.businessContext.department],
+            ["environment", item.environment],
+          ]),
+        };
+      }),
+      acks: ProduceAcks.LEADER // Only wait for leader acknowledgment
+    });
+    console.log(`Successfully sent messages to monitoring.raw.events`);
+
+    // Send to domain-specific topics
+    for (const [domain, messages] of Object.entries(messagesByDomain)) {
+      const topicName = `monitoring.${domain.toLowerCase().replace(/[^a-z0-9]/g, "-")}.events`;
+      console.log(`Sending ${messages.length} messages to topic: ${topicName}`);
+
+      await producer.send({
+        messages: messages.map(msg => ({
+          topic: topicName,
+          key: msg.key,
+          value: msg.value,
+          headers: new Map([
+            ["monitor-type", msg.headers["monitor-type"]],
+            ["status", msg.headers["status"]],
+            ["domain", msg.headers["domain"]],
+            ["department", msg.headers["department"]],
+            ["environment", msg.headers["environment"]],
+          ]),
+        })),
+        acks: ProduceAcks.LEADER // Only wait for leader acknowledgment
       });
+      console.log(`Successfully sent messages to ${topicName}`);
     }
-    console.log(
-      `Successfully sent ${validatedData.length} messages to Kafka`,
-    );
-  } catch (error) {
-    console.error("Error sending to Kafka:", error);
+
+    console.log(`Successfully sent all messages to Kafka`);
+  } catch (error: any) {
+    if (error.code === 'PLT_KFK_PRODUCER_ERROR') {
+      console.error("Producer error:", error.message);
+    } else if (error.code === 'PLT_KFK_CONNECTION_ERROR') {
+      console.error("Connection error:", error.message);
+    } else {
+      console.error("Error sending to Kafka:", error);
+    }
+    throw error; // Re-throw to be handled by the caller
   }
 }
 
 // Start the extraction process on an interval
 async function startExtractionProcess() {
   console.log("🚀 Starting synthetics monitor extractor...");
-  const connectionValidation = await validateConnections();
   
-  if (!connectionValidation.valid) {
-    console.error("❌ Connection validation failed:", connectionValidation.errors.join(', '));
-    console.log("⚠️ Continuing with interval setup - connections will be retried during extraction cycles");
-  }
-  
-  if (connectionValidation.warnings && connectionValidation.warnings.length > 0) {
-    console.log("✅ Connections validated:", connectionValidation.warnings.join(', '));
-  }
-
-  // Initial run
-  console.log("Running initial data extraction...");
   try {
-    await extractAndProcessMonitors();
-  } catch (error) {
-    console.error("❌ Initial extraction failed:", error);
-    console.log("⚠️ Continuing with interval setup - subsequent extractions will be retried");
-  }
-
-  // Set up interval for regular extraction
-  const intervalMinutes = config.extraction.intervalMinutes;
-  console.log(
-    `Setting up extraction to run every ${intervalMinutes} minute(s)`,
-  );
-
-  // Store the interval ID so we can clear it if needed
-  const intervalId = setInterval(async () => {
-    console.log(`\n🕒 Running scheduled extraction (every ${intervalMinutes} minutes)...`);
-    try {
-      await extractAndProcessMonitors();
-      console.log(`✅ Scheduled extraction completed successfully`);
-    } catch (error) {
-      console.error(`❌ Scheduled extraction failed:`, error);
+    const connectionValidation = await validateConnections();
+    
+    if (!connectionValidation.valid) {
+      console.error("❌ Connection validation failed:", connectionValidation.errors.join(', '));
+      console.log("⚠️ Continuing with interval setup - connections will be retried during extraction cycles");
     }
-  }, intervalMinutes * 60 * 1000);
+    
+    if (connectionValidation.warnings && connectionValidation.warnings.length > 0) {
+      console.log("✅ Connections validated:", connectionValidation.warnings.join(', '));
+    }
 
-  console.log(`✅ Extraction interval set up successfully - will run every ${intervalMinutes} minute(s)`);
+    // Initial run
+    console.log("Running initial data extraction...");
+    await extractAndProcessMonitors();
 
-  // Clean up interval on process termination
-  process.on('SIGTERM', () => {
-    console.log('Clearing extraction interval...');
-    clearInterval(intervalId);
-  });
+    // Set up interval for regular extraction
+    const intervalMinutes = config.extraction.intervalMinutes;
+    console.log(
+      `Setting up extraction to run every ${intervalMinutes} minute(s)`,
+    );
+
+    // Store the interval ID so we can clear it if needed
+    const intervalId = setInterval(async () => {
+      console.log(`\n🕒 Running scheduled extraction (every ${intervalMinutes} minutes)...`);
+      try {
+        await extractAndProcessMonitors();
+        console.log(`✅ Scheduled extraction completed successfully`);
+      } catch (error) {
+        console.error(`❌ Scheduled extraction failed:`, error);
+      }
+    }, intervalMinutes * 60 * 1000);
+
+    console.log(`✅ Extraction interval set up successfully - will run every ${intervalMinutes} minute(s)`);
+
+    // Clean up interval on process termination
+    process.on('SIGTERM', () => {
+      console.log('Clearing extraction interval...');
+      clearInterval(intervalId);
+    });
+  } catch (error) {
+    console.error("Failed to start extraction process:", error);
+    throw error;
+  }
 }
 
 // Clean shutdown handler
 process.on("SIGTERM", async () => {
   console.log("Received SIGTERM, shutting down gracefully");
-  await producer.close();
+  try {
+    await producer.close();
+    console.log("Producer closed successfully");
+  } catch (error) {
+    console.error("Error closing producer:", error);
+  }
   process.exit(0);
 });
 
 // Run the extraction process if this file is executed directly
 if (import.meta.main) {
   (async () => {
-    const metricsServer = await startMetricsServer();
-    await startExtractionProcess();
-  })().catch((error) => {
-    console.error("Failed to start extraction process:", error);
-    console.log("⚠️ Service will continue running - interval may still be set up if the error occurred after interval setup");
-  });
+    try {
+      const metricsServer = await startMetricsServer();
+      await startExtractionProcess();
+    } catch (error) {
+      console.error("Failed to start extraction process:", error);
+      process.exit(1);
+    }
+  })();
 }
 
 export default {
