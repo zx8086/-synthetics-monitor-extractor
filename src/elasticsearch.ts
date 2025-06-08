@@ -1,5 +1,5 @@
 import { Client, estypes } from "@elastic/elasticsearch";
-import { Transport, TransportRequestParams, HttpConnection } from "@elastic/transport";
+import { Transport, type TransportRequestParams, HttpConnection } from "@elastic/transport";
 import { config } from "./config.js";
 import * as tls from "tls";
 import * as http from "http";
@@ -31,19 +31,6 @@ export function getElasticsearchClient(): Client {
   if (!clientInstance) {
     console.log("Creating new Elasticsearch client with connection pooling");
     
-    // Create a connection pool configuration
-    const connectionOptions = {
-      ssl: {
-        rejectUnauthorized: config.elasticsearch.rejectUnauthorized,
-      },
-      agent: config.elasticsearch.node.startsWith("https") ? httpsAgent : httpAgent,
-      suggestCompression: config.elasticsearch.compression,
-      keepAlive: true,
-      keepAliveInterval: 30000, // 30 seconds
-      maxSockets: 50,
-      requestTimeout: config.elasticsearch.requestTimeout,
-    };
-
     clientInstance = new Client({
       node: config.elasticsearch.node,
       auth: config.elasticsearch.apiKeyId && config.elasticsearch.apiKey
@@ -67,15 +54,11 @@ export function getElasticsearchClient(): Client {
         "Content-Type": "application/json",
         "Accept-Encoding": "gzip, deflate",
       },
-      connection: {
-        ...connectionOptions,
-        resurrectStrategy: "ping",
-        resurrectAfter: 5000, // 5 seconds
-      },
+      Connection: HttpConnection,
       tls: {
         rejectUnauthorized: config.elasticsearch.rejectUnauthorized,
       },
-      Connection: HttpConnection, // Use HttpConnection instead of default UndiciConnection
+      agent: config.elasticsearch.node.startsWith("https") ? httpsAgent : httpAgent,
     });
 
     // Set up a maintenance interval to keep connections alive

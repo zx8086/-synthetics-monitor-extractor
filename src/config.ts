@@ -79,7 +79,7 @@ const LoggingConfigSchema = z.object({
 const MetricsConfigSchema = z.object({
   enabled: z.boolean().default(true),
   port: z.number().min(1000).max(65535).default(9090),
-  prefix: z.string().default("synthetics_extractor__"),
+  prefix: z.string().default("synthetics_extractor_"),
   endpoint: z.string().default("/metrics"),
 });
 
@@ -131,7 +131,7 @@ const defaultConfig: Config = {
   metrics: {
     enabled: true,
     port: 9090,
-    prefix: "synthetics_extractor__",
+    prefix: "synthetics_extractor_",
     endpoint: "/metrics",
   },
   nodeEnv: "development",
