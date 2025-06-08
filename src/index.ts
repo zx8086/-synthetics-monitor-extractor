@@ -1,7 +1,6 @@
 /* src/index.ts */
 
 import { Client, estypes } from "@elastic/elasticsearch";
-import { Producer, Admin, stringSerializers, ProduceAcks } from "@platformatic/kafka";
 import { HttpConnection } from "@elastic/transport";
 import {
   type BusinessContext,
@@ -27,209 +26,14 @@ import {
   closeElasticsearchClient,
   checkElasticsearchHealth
 } from "./elasticsearch.js";
+import {
+  getKafkaProducer,
+  sendMonitorDataToKafka,
+  checkKafkaConnection,
+  closeKafkaProducer
+} from './kafka.js';
 
 initializeMetrics();
-
-// Create producer with proper configuration
-const producer = new Producer({
-  clientId: config.kafka.clientId,
-  bootstrapBrokers: config.kafka.brokers,
-  serializers: stringSerializers,
-  ...(config.kafka.ssl && {
-    tls: {
-      rejectUnauthorized: true,
-    },
-  }),
-  ...(config.kafka.ssl && config.kafka.username && config.kafka.password && {
-    sasl: {
-      mechanism: "PLAIN" as const,
-      username: config.kafka.username,
-      password: config.kafka.password,
-    },
-  }),
-});
-
-// Check Kafka connection and list topics
-async function checkKafkaConnection() {
-  try {
-    console.log(
-      "Attempting to connect to Kafka at:",
-      config.kafka.brokers.join(","),
-    );
-
-    // Create admin client for metadata operations
-    const admin = new Admin({
-      clientId: config.kafka.clientId,
-      bootstrapBrokers: config.kafka.brokers,
-      ...(config.kafka.ssl && {
-        tls: {
-          rejectUnauthorized: true,
-        },
-      }),
-      ...(config.kafka.ssl && config.kafka.username && config.kafka.password && {
-        sasl: {
-          mechanism: "PLAIN" as const,
-          username: config.kafka.username,
-          password: config.kafka.password,
-        },
-      }),
-    });
-
-    // Test connection with retry logic
-    let retries = 3;
-    while (retries > 0) {
-      try {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        console.log("✅ Successfully connected to Kafka");
-        break;
-      } catch (error: any) {
-        retries--;
-        if (retries === 0) throw error;
-        console.log(
-          `Retrying Kafka connection... (${retries} attempts remaining)`,
-        );
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-    }
-
-    // Get metadata for all topics
-    const metadata = await admin.metadata({ topics: [] });
-    
-    // Debug metadata structure
-    console.log("Metadata structure type check:");
-    console.log("- topics is Map?", metadata.topics instanceof Map);
-    console.log("- topics type:", typeof metadata.topics);
-    
-    let topics: string[] = [];
-    let monitoringTopics: string[] = [];
-    
-    // Try different approaches to extract topics
-    if (metadata.topics instanceof Map) {
-      // If topics is a Map, use keys()
-      topics = Array.from(metadata.topics.keys());
-    } else if (typeof metadata.topics === 'object') {
-      // If topics is a plain object, use Object.keys
-      topics = Object.keys(metadata.topics);
-    }
-    
-    console.log("All topic names:", topics);
-    
-    // Filter for monitoring topics
-    monitoringTopics = topics.filter(topic => 
-      typeof topic === 'string' && topic.startsWith('monitoring.')
-    );
-    
-    console.log("📋 Available monitoring topics:", monitoringTopics);
-    
-    // Try to get details for each monitoring topic
-    console.log("📊 Attempting to get monitoring topic details:");
-    for (const topicName of monitoringTopics) {
-      try {
-        // Try different approaches to get topic metadata
-        let topicMetadata;
-        if (metadata.topics instanceof Map) {
-          topicMetadata = metadata.topics.get(topicName);
-        } else if (typeof metadata.topics === 'object') {
-          topicMetadata = metadata.topics[topicName];
-        }
-        
-        if (topicMetadata) {
-          console.log(`  - ${topicName}:`);
-          if (topicMetadata.partitions) {
-            console.log(`    Partitions: ${topicMetadata.partitions.length}`);
-            if (topicMetadata.partitions.length > 0 && topicMetadata.partitions[0]?.replicas) {
-              console.log(`    Replication Factor: ${topicMetadata.partitions[0].replicas.length || "unknown"}`);
-            }
-          } else {
-            console.log(`    Metadata structure: ${JSON.stringify(topicMetadata, null, 2).substring(0, 100)}...`);
-          }
-        } else {
-          console.log(`  - ${topicName}: No detailed metadata available`);
-        }
-      } catch (err: any) {
-        console.log(`  - ${topicName}: Error getting details:`, err.message);
-      }
-    }
-
-    await admin.close();
-    return true;
-  } catch (error: any) {
-    console.error("❌ Failed to connect to Kafka");
-    console.error("Error details:", error?.message || "Unknown error");
-    if (error?.stack) {
-      console.error("Stack trace:", error.stack);
-    }
-    return false;
-  }
-}
-
-// Check Elasticsearch connection with retry logic
-async function checkElasticsearchConnection() {
-  const maxRetries = 3;
-  let retries = maxRetries;
-
-  while (retries > 0) {
-    try {
-      console.log(
-        `Checking Elasticsearch connection (${maxRetries - retries + 1}/${maxRetries})...`,
-      );
-
-      const isHealthy = await checkElasticsearchHealth();
-      
-      if (isHealthy) {
-        // Get cluster info
-        const client = getElasticsearchClient();
-        const info = await client.info();
-
-        console.log("✅ Successfully connected to Elasticsearch", {
-          version: info.version?.number,
-          clusterName: info.cluster_name,
-          clusterUuid: info.cluster_uuid,
-          luceneVersion: info.version?.lucene_version,
-        });
-
-        // Store version info for feature detection
-        const serverVersion = info.version?.number ?? "0.0.0";
-        const majorVersion = parseInt(serverVersion.split(".")[0] ?? "0");
-
-        if (majorVersion >= 9) {
-          console.log(
-            `🆕 Connected to Elasticsearch ${serverVersion} - using modern client features`,
-          );
-        } else if (majorVersion >= 8) {
-          console.log(
-            `⚡ Connected to Elasticsearch ${serverVersion} - full feature support`,
-          );
-        } else {
-          console.warn(
-            `⚠️ Connected to older Elasticsearch ${serverVersion} - some features may be limited`,
-          );
-        }
-
-        return true;
-      }
-
-      return false;
-    } catch (error: any) {
-      retries--;
-      if (retries === 0) {
-        console.error(
-          "❌ Failed to connect to Elasticsearch after all retries",
-        );
-        console.error("Error details:", error?.message || "Unknown error");
-        if (error?.meta?.body) {
-          console.error("Response:", error.meta.body);
-        }
-        return false;
-      }
-      console.log(
-        `Retrying Elasticsearch connection... (${retries} attempts remaining)`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-  }
-  return false;
-}
 
 // Main function to extract and process monitor data
 async function extractAndProcessMonitors() {
@@ -246,13 +50,13 @@ async function extractAndProcessMonitors() {
     }
 
     // Check Kafka connection and list topics
-    const isKafkaConnected = await checkKafkaConnection();
+    const { connected: isKafkaConnected } = await checkKafkaConnection();
     if (!isKafkaConnected) {
       console.error("❌ Kafka connection failed - skipping this extraction cycle");
       return;
     }
 
-    console.log("Connected to Kafka producer");
+    console.log("Connected to Kafka");
 
     // Fetch all synthetic monitor data
     const monitorData = await fetchAllMonitorData();
@@ -267,8 +71,8 @@ async function extractAndProcessMonitors() {
     // Process and transform the monitor data
     const transformedData = transformMonitorData(monitorData);
 
-    // Send to Kafka topics
-    await sendToKafka(transformedData);
+    // Send to Kafka topics using our service
+    await sendMonitorDataToKafka(transformedData);
 
     console.log("Monitor extraction completed successfully");
   } catch (error) {
@@ -574,125 +378,6 @@ function extractServiceInfo(source: ElasticsearchHit["_source"]): ServiceInfo {
   return serviceInfo;
 }
 
-// Send transformed monitor data to Kafka
-async function sendToKafka(transformedData: MonitorInfo[]) {
-  if (!transformedData || transformedData.length === 0) {
-    return;
-  }
-
-  const validatedData = validateMonitorInfo(transformedData);
-  console.log(`Final validation: ${validatedData.length} records ready for Kafka`);
-
-  // Batch the messages by domain
-  const messagesByDomain: Record<string, any[]> = {};
-
-  for (const item of validatedData) {
-    const domain = item.businessContext.domain || "unknown";
-    const department = item.businessContext.department || "unknown";
-    const timestamp = new Date(item.timestamp).getTime();
-
-    // Generate a unique document ID that includes timestamp
-    const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
-
-    // Create domain key for kafka topics
-    const domainKey = `${domain}`;
-
-    if (!messagesByDomain[domainKey]) {
-      messagesByDomain[domainKey] = [];
-    }
-
-    messagesByDomain[domainKey].push({
-      key: uniqueKey,
-      value: JSON.stringify(item),
-      headers: {
-        "monitor-type": item.type,
-        status: item.status,
-        domain: domain,
-        department: department,
-        environment: item.environment,
-      },
-    });
-  }
-
-  console.log("Messages grouped by domain:", Object.keys(messagesByDomain));
-
-  if (config.metrics.enabled) {
-    validatedData.forEach((item) => {
-      const messageSize = Buffer.byteLength(JSON.stringify(item));
-      kafkaMessageSizeHistogram.observe({ topic: "monitoring.raw.events" }, messageSize);
-    });
-    
-    for (const [domain, messages] of Object.entries(messagesByDomain)) {
-      const topicName = `monitoring.${domain.toLowerCase().replace(/[^a-z0-9]/g, "-")}.events`;
-      messages.forEach(msg => {
-        const messageSize = Buffer.byteLength(msg.value);
-        kafkaMessageSizeHistogram.observe({ topic: topicName }, messageSize);
-      });
-    }
-  }
-
-  try {
-    // Send to raw events topic first
-    console.log(`Sending ${validatedData.length} messages to topic: monitoring.raw.events`);
-    await producer.send({
-      messages: validatedData.map((item) => {
-        const domain = item.businessContext.domain || "unknown";
-        const timestamp = new Date(item.timestamp).getTime();
-        const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
-
-        return {
-          topic: "monitoring.raw.events",
-          key: uniqueKey,
-          value: JSON.stringify(item),
-          headers: new Map([
-            ["monitor-type", item.type],
-            ["status", item.status],
-            ["domain", domain],
-            ["department", item.businessContext.department],
-            ["environment", item.environment],
-          ]),
-        };
-      }),
-      acks: ProduceAcks.LEADER // Only wait for leader acknowledgment
-    });
-    console.log(`Successfully sent messages to monitoring.raw.events`);
-
-    // Send to domain-specific topics
-    for (const [domain, messages] of Object.entries(messagesByDomain)) {
-      const topicName = `monitoring.${domain.toLowerCase().replace(/[^a-z0-9]/g, "-")}.events`;
-      console.log(`Sending ${messages.length} messages to topic: ${topicName}`);
-
-      await producer.send({
-        messages: messages.map(msg => ({
-          topic: topicName,
-          key: msg.key,
-          value: msg.value,
-          headers: new Map([
-            ["monitor-type", msg.headers["monitor-type"]],
-            ["status", msg.headers["status"]],
-            ["domain", msg.headers["domain"]],
-            ["department", msg.headers["department"]],
-            ["environment", msg.headers["environment"]],
-          ]),
-        })),
-        acks: ProduceAcks.LEADER // Only wait for leader acknowledgment
-      });
-      console.log(`Successfully sent messages to ${topicName}`);
-    }
-
-    console.log(`Successfully sent all messages to Kafka`);
-  } catch (error: any) {
-    if (error.code === 'PLT_KFK_PRODUCER_ERROR') {
-      console.error("Producer error:", error.message);
-    } else if (error.code === 'PLT_KFK_CONNECTION_ERROR') {
-      console.error("Connection error:", error.message);
-    } else {
-      console.error("Error sending to Kafka:", error);
-    }
-    throw error; // Re-throw to be handled by the caller
-  }
-}
-
 // Start the extraction process on an interval
 async function startExtractionProcess() {
   console.log("🚀 Starting synthetics monitor extractor...");
@@ -749,7 +434,7 @@ process.on("SIGTERM", async () => {
   console.log("Received SIGTERM, shutting down gracefully");
   try {
     await closeElasticsearchClient();
-    await producer.close();
+    await closeKafkaProducer();
     console.log("All connections closed successfully");
   } catch (error) {
     console.error("Error during shutdown:", error);
@@ -774,5 +459,5 @@ export default {
   extractAndProcessMonitors,
   fetchAllMonitorData,
   transformMonitorData,
-  sendToKafka,
+  sendMonitorDataToKafka,
 };
