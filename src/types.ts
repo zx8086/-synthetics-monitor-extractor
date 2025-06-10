@@ -59,7 +59,7 @@ export interface ElasticsearchHit {
       id: string;
       name: string;
       type: string;
-      status: string;
+      status?: string;
       duration?: { us: number };
     };
     url?: {
@@ -195,7 +195,7 @@ export const ElasticsearchMonitorSchema = z.object({
   id: z.string(),
   name: z.string(),
   type: z.string(),
-  status: z.string(),
+  status: z.string().optional(),
   duration: z
     .object({
       us: z.number(),

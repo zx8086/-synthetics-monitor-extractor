@@ -168,7 +168,7 @@ function transformMonitorData(monitorData: ElasticsearchHit[]): MonitorInfo[] {
       type: source.monitor.type,
       url: source.url?.full,
       timestamp: source["@timestamp"],
-      status: source.monitor.status,
+      status: source.monitor.status || "unknown",
       duration: source.monitor.duration?.us
         ? source.monitor.duration.us / 1000
         : 0, // Convert to ms
