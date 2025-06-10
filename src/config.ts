@@ -46,6 +46,7 @@ const KafkaConfigSchema = z
     requestTimeout: z.number().min(1000).max(60000).default(30000),
     initialRetryTime: z.number().min(100).max(10000).default(1000),
     retries: z.number().min(0).max(20).default(8),
+    topicName: z.string().min(1).default("monitoring.raw.events"),
   })
   .refine(
     (data) => {
@@ -63,7 +64,7 @@ const KafkaConfigSchema = z
 
 const ExtractionConfigSchema = z.object({
   intervalMinutes: z.number().min(1).max(60).default(1),
-  timeRange: z.string().default("now-5m"),
+  timeRange: z.string().default("now-2m"),
   maxResults: z.number().min(1).max(10000).default(1000),
   timeout: z.string().default("30s"),
   indexPattern: z.string().default("synthetics-*"),
@@ -114,6 +115,7 @@ const defaultConfig: Config = {
     requestTimeout: 30000,
     initialRetryTime: 1000,
     retries: 8,
+    topicName: "monitoring.raw.events",
   },
   extraction: {
     intervalMinutes: 1,
@@ -161,6 +163,7 @@ const envVarMapping = {
     requestTimeout: "KAFKA_REQUEST_TIMEOUT",
     initialRetryTime: "KAFKA_INITIAL_RETRY_TIME",
     retries: "KAFKA_RETRIES",
+    topicName: "KAFKA_TOPIC_NAME",
   },
   extraction: {
     intervalMinutes: "EXTRACTION_INTERVAL_MINUTES",
@@ -242,6 +245,7 @@ function loadConfigFromEnv(): Partial<Config> {
     requestTimeout: getEnvConfig(envVarMapping.kafka.requestTimeout, "number"),
     initialRetryTime: getEnvConfig(envVarMapping.kafka.initialRetryTime, "number"),
     retries: getEnvConfig(envVarMapping.kafka.retries, "number"),
+    topicName: getEnvConfig(envVarMapping.kafka.topicName, "string"),
   };
 
   // Load Extraction config
@@ -424,6 +428,7 @@ try {
             brokers: config.kafka.brokers,
             ssl: config.kafka.ssl,
             hasAuth: !!config.kafka.username,
+            topicName: config.kafka.topicName,
           },
           extraction: {
             intervalMinutes: config.extraction.intervalMinutes,

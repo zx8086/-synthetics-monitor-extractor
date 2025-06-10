@@ -1,17 +1,15 @@
 /* src/types.ts */
 
 import { z } from "zod";
+import { writeFile } from "fs/promises";
+import { join } from "path";
+import fs from "fs/promises";
 
 export interface BusinessContext {
   domain: string;
   department: string;
   criticality: "high" | "medium" | "low";
   environment: string;
-}
-
-export interface ServiceInfo {
-  name: string;
-  endpoint: string;
 }
 
 export interface MonitorInfo {
@@ -25,7 +23,6 @@ export interface MonitorInfo {
   businessContext: BusinessContext;
   tags: string[];
   environment: string;
-  service: ServiceInfo;
   http?: {
     statusCode?: number;
     responseTime?: number;
@@ -129,15 +126,16 @@ export interface SearchResponse<T> {
 
 // Zod schemas for validation
 export const BusinessContextSchema = z.object({
-  domain: z.string(),
-  department: z.string(),
+  domain: z.string().min(1).refine(val => val !== "unknown", {
+    message: "Domain cannot be 'unknown'"
+  }),
+  department: z.string().min(1).refine(val => val !== "unknown", {
+    message: "Department cannot be 'unknown'"
+  }),
   criticality: z.enum(["high", "medium", "low"]),
-  environment: z.string(),
-});
-
-export const ServiceInfoSchema = z.object({
-  name: z.string(),
-  endpoint: z.string(),
+  environment: z.string().min(1).refine(val => val !== "unknown", {
+    message: "Environment cannot be 'unknown'"
+  }),
 });
 
 export const MonitorInfoSchema = z.object({
@@ -151,7 +149,6 @@ export const MonitorInfoSchema = z.object({
   businessContext: BusinessContextSchema,
   tags: z.array(z.string()),
   environment: z.string(),
-  service: ServiceInfoSchema,
   http: z
     .object({
       statusCode: z.number().optional(),
@@ -288,19 +285,107 @@ export const ElasticsearchHitSchema = z.object({
   _source: ElasticsearchSourceSchema,
 });
 
+// Helper function to write invalid records to file
+export async function writeInvalidRecords(type: string, errors: Array<{ message: string }>, monitorName?: string): Promise<void> {
+  const timestamp = new Date().toISOString();
+  const invalidData = {
+    timestamp,
+    monitorName,
+    errors
+  };
+
+  try {
+    // Read existing content if file exists
+    let existingContent: any[] = [];
+    try {
+      const fileContent = await fs.readFile('src/invalid.json', 'utf-8');
+      existingContent = JSON.parse(fileContent);
+      if (!Array.isArray(existingContent)) {
+        existingContent = [existingContent];
+      }
+    } catch (error) {
+      // File doesn't exist or is empty, start with empty array
+      existingContent = [];
+    }
+
+    // Append new invalid record
+    existingContent.push(invalidData);
+
+    // Write back to file
+    await fs.writeFile('src/invalid.json', JSON.stringify(existingContent, null, 2));
+  } catch (error) {
+    console.error('Error writing invalid records:', error);
+  }
+}
+
 // Validation functions
-export function validateElasticsearchHits(data: unknown[]): ElasticsearchHit[] {
-  return data.map((hit) => ElasticsearchHitSchema.parse(hit));
+export async function validateElasticsearchHits(data: unknown[]): Promise<ElasticsearchHit[]> {
+  const validHits: ElasticsearchHit[] = [];
+  const errorsByMonitor: Record<string, Set<string>> = {};
+
+  for (const hit of data) {
+    try {
+      const validatedHit = ElasticsearchHitSchema.parse(hit);
+      validHits.push(validatedHit);
+    } catch (error) {
+      // Try to get monitor name even from invalid hit
+      const monitorName = (hit as any)?._source?.monitor?.name;
+      if (!monitorName) continue; // Skip if we can't get a monitor name
+      
+      if (!errorsByMonitor[monitorName]) {
+        errorsByMonitor[monitorName] = new Set();
+      }
+
+      if (error instanceof z.ZodError) {
+        error.issues.forEach(issue => {
+          errorsByMonitor[monitorName].add(`${issue.path.join('.')}: ${issue.message}`);
+        });
+      } else {
+        errorsByMonitor[monitorName].add(String(error));
+      }
+    }
+  }
+
+  // Write errors for each monitor
+  for (const [monitorName, errorSet] of Object.entries(errorsByMonitor)) {
+    if (errorSet.size > 0) {
+      const errors = Array.from(errorSet).map(message => ({ message }));
+      await writeInvalidRecords('elasticsearch_hits', errors, monitorName);
+    }
+  }
+
+  return validHits;
 }
 
-export function validateMonitorInfo(data: unknown[]): MonitorInfo[] {
-  return data.map((info) => MonitorInfoSchema.parse(info));
+export async function validateMonitorInfo(data: unknown[]): Promise<MonitorInfo[]> {
+  const validMonitors: MonitorInfo[] = [];
+  const errors: unknown[] = [];
+  
+  for (const info of data) {
+    try {
+      const validatedInfo = MonitorInfoSchema.parse(info);
+      validMonitors.push(validatedInfo);
+    } catch (error) {
+      console.warn("Skipping invalid monitor info:", error);
+      errors.push(error);
+      continue;
+    }
+  }
+
+  if (errors.length > 0) {
+    await writeInvalidRecords('monitor_info', errors.map(error => ({ message: error instanceof Error ? error.message : String(error) })), 'unknown');
+  }
+
+  return validMonitors;
 }
 
-export function validateBusinessContext(data: unknown): BusinessContext {
-  return BusinessContextSchema.parse(data);
+export async function validateBusinessContext(data: unknown): Promise<BusinessContext> {
+  try {
+    return BusinessContextSchema.parse(data);
+  } catch (error) {
+    console.warn("Invalid business context:", error);
+    await writeInvalidRecords('business_context', [{ message: error instanceof Error ? error.message : String(error) }], 'unknown');
+    throw error; // Re-throw to invalidate the record
+  }
 }
 
-export function validateServiceInfo(data: unknown): ServiceInfo {
-  return ServiceInfoSchema.parse(data);
-}
