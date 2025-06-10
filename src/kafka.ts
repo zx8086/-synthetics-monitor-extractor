@@ -114,6 +114,28 @@ function createKafkaMessage(
 }
 
 /**
+ * Utility function to create monitor message with headers
+ */
+function createMonitorMessage(
+  item: MonitorInfo,
+  topic: string,
+  keyPrefix: string = "raw"
+): KafkaMessage {
+  const domain = item.businessContext.domain || "unknown";
+  const timestamp = new Date(item.timestamp).getTime();
+  const uniqueKey = `${keyPrefix}::${domain}::${item.id}::${timestamp}`;
+  const headers = new Map([
+    ["monitor-type", item.type],
+    ["status", item.status],
+    ["domain", domain],
+    ["department", item.businessContext.department || "unknown"],
+    ["environment", item.environment],
+  ]);
+
+  return createKafkaMessage(topic, uniqueKey, JSON.stringify(item), headers);
+}
+
+/**
  * Send monitor data to Kafka topics
  * Handles sending to both the raw events topic and domain-specific topics
  */
@@ -156,40 +178,19 @@ export async function sendMonitorDataToKafka(
     ]);
 
     messagesByDomain[domain].push(
-      createKafkaMessage(
-        topicName,
-        uniqueKey,
-        JSON.stringify(item),
-        headers
-      )
+      createMonitorMessage(item, topicName, domain)
     );
   }
 
-  console.log("Messages grouped by domain:", Object.keys(messagesByDomain));
+
 
   try {
     // Send to raw events topic first
     console.log(`Sending ${monitorData.length} messages to topic: monitoring.raw.events`);
     await producer.send({
-      messages: monitorData.map((item) => {
-        const domain = item.businessContext.domain || "unknown";
-        const timestamp = new Date(item.timestamp).getTime();
-        const uniqueKey = `raw::${domain}::${item.id}::${timestamp}`;
-        const headers = new Map([
-          ["monitor-type", item.type],
-          ["status", item.status],
-          ["domain", domain],
-          ["department", item.businessContext.department],
-          ["environment", item.environment],
-        ]);
-
-        return createKafkaMessage(
-          "monitoring.raw.events",
-          uniqueKey,
-          JSON.stringify(item),
-          headers
-        );
-      }),
+      messages: monitorData.map((item) => 
+        createMonitorMessage(item, "monitoring.raw.events", "raw")
+      ),
       acks: ProduceAcks.LEADER // Only wait for leader acknowledgment
     });
     
@@ -293,4 +294,4 @@ export async function closeKafkaProducer(): Promise<void> {
     await producerInstance.close();
     producerInstance = null;
   }
-} 
+}    

@@ -114,11 +114,7 @@ async function fetchAllMonitorData() {
     };
 
     console.log("Executing Elasticsearch query...");
-    console.log("Query parameters:", {
-      timeRange,
-      size,
-      index: config.extraction.indexPattern,
-    });
+
     
     // Use the client directly for more complex operations
     const client = getElasticsearchClient();
@@ -134,10 +130,7 @@ async function fetchAllMonitorData() {
     if (response.hits.hits.length === 0) {
       console.log("No hits found. Checking if index exists...");
       const indices = await client.cat.indices({ format: "json" });
-      console.log(
-        "Available indices:",
-        indices.map((idx) => idx.index),
-      );
+
     }
 
     const rawHits = response.hits.hits.map((hit) => ({
@@ -292,33 +285,36 @@ function extractBusinessContext(
 
   // Try to extract environment from monitor name if not found in tags
   if (context.environment === "unknown" && validatedSource.monitor?.name) {
-    const name = validatedSource.monitor.name.toLowerCase();
-    if (name.includes("prod") || name.includes("prd")) {
-      context.environment = "production";
-    } else if (name.includes("dev")) {
-      context.environment = "development";
-    } else if (name.includes("stage") || name.includes("stg")) {
-      context.environment = "staging";
-    } else if (name.includes("test") || name.includes("qa")) {
-      context.environment = "testing";
-    }
+    context.environment = extractEnvironmentFromSource(validatedSource.monitor.name);
   }
 
   // Try to extract from URL if environment still unknown
   if (context.environment === "unknown" && validatedSource.url?.domain) {
-    const domain = validatedSource.url.domain.toLowerCase();
-    if (domain.includes("prod") || domain.includes("prd")) {
-      context.environment = "production";
-    } else if (domain.includes("dev")) {
-      context.environment = "development";
-    } else if (domain.includes("stage") || domain.includes("stg")) {
-      context.environment = "staging";
-    } else if (domain.includes("test") || domain.includes("qa")) {
-      context.environment = "testing";
-    }
+    context.environment = extractEnvironmentFromSource(validatedSource.url.domain);
   }
 
   return context;
+}
+
+function cleanServiceName(name: string): string {
+  return name
+    .replace(/-api$/, "")
+    .replace(/^api-/, "")
+    .replace(/-service$/, "");
+}
+
+function extractEnvironmentFromSource(source: string): string {
+  const lowerSource = source.toLowerCase();
+  if (lowerSource.includes("prod") || lowerSource.includes("prd")) {
+    return "production";
+  } else if (lowerSource.includes("dev")) {
+    return "development";
+  } else if (lowerSource.includes("stage") || lowerSource.includes("stg")) {
+    return "staging";
+  } else if (lowerSource.includes("test") || lowerSource.includes("qa")) {
+    return "testing";
+  }
+  return "unknown";
 }
 
 // Extract service information from monitor data
@@ -349,10 +345,7 @@ function extractServiceInfo(source: ElasticsearchHit["_source"]): ServiceInfo {
       serviceInfo.name = domainParts[0] || "unknown";
 
       // Clean up common prefixes/suffixes
-      serviceInfo.name = serviceInfo.name
-        .replace(/-api$/, "")
-        .replace(/^api-/, "")
-        .replace(/-service$/, "");
+      serviceInfo.name = cleanServiceName(serviceInfo.name);
     }
 
     // Get endpoint from path
@@ -366,12 +359,9 @@ function extractServiceInfo(source: ElasticsearchHit["_source"]): ServiceInfo {
     // Parse monitor name patterns like "DS - API Health - prd | Process-api"
     const parts = validatedSource.monitor.name.split("|");
     if (parts.length > 1) {
-      serviceInfo.name =
-        parts[1]
-          ?.trim()
-          .replace(/-api$/, "")
-          .replace(/^api-/, "")
-          .replace(/-service$/, "") || "unknown";
+      serviceInfo.name = cleanServiceName(
+        parts[1]?.trim() || "unknown"
+      );
     }
   }
 
