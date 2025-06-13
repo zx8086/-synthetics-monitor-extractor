@@ -4,7 +4,11 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "bun run --watch src/index.ts"
+    "start": "bun run --watch src/index.ts",
+    "test:validation": "bun run test-message-validation.ts",
+    "test:production": "bun run test-production-failures.ts",
+    "test:production-simple": "bun run test-production-simple.ts",
+    "test:schema": "bun run test-schema-investigation.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
