@@ -170,7 +170,7 @@ async function fetchAllMonitorData() {
 }
 
 // Extract business context directly from monitor tags
-function extractBusinessContext(source: ElasticsearchHit["_source"]): BusinessContext {
+export function extractBusinessContext(source: ElasticsearchHit["_source"]): BusinessContext {
   const tags = source.tags || [];
   const missingFields: string[] = [];
   let domain = "unknown";
@@ -195,7 +195,8 @@ function extractBusinessContext(source: ElasticsearchHit["_source"]): BusinessCo
 
   if (domain === "unknown") missingFields.push("domain");
   if (department === "unknown") missingFields.push("department");
-  if (criticality === "medium") missingFields.push("criticality");
+  const hasCriticalityTag = tags.some(tag => tag.startsWith("criticality:"));
+  if (!hasCriticalityTag && criticality === "medium") missingFields.push("criticality");
   if (environment === "unknown") missingFields.push("environment");
 
   if (missingFields.length > 0) {

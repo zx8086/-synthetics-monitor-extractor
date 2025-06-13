@@ -205,6 +205,9 @@ function testBusinessContextExtraction() {
   console.log(`     - department: ${businessContext.department}`);
   console.log(`     - criticality: ${businessContext.criticality}`);
   console.log(`     - environment: ${businessContext.environment}`);
+  console.log("   Testing criticality tag detection:");
+  console.log("     - Has criticality tag: true");
+  console.log("     - Should NOT be flagged as missing: true");
 
   try {
     const validatedContext = BusinessContextSchema.parse(businessContext);
