@@ -68,7 +68,7 @@ const ExtractionConfigSchema = z.object({
   maxResults: z.number().min(1).max(10000).default(1000),
   timeout: z.string().default("30s"),
   indexPattern: z.string().default("synthetics-*"),
-  monitorNamePattern: z.string().default("*"),
+  monitorNamePattern: z.string().default("*prd*"),
 });
 
 const LoggingConfigSchema = z.object({
@@ -90,7 +90,9 @@ const ConfigSchema = z.object({
   extraction: ExtractionConfigSchema,
   logging: LoggingConfigSchema,
   metrics: MetricsConfigSchema,
-  nodeEnv: z.enum(["development", "production", "staging"]).default("development"),
+  nodeEnv: z
+    .enum(["development", "production", "staging"])
+    .default("development"),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -118,12 +120,12 @@ const defaultConfig: Config = {
     topicName: "monitoring.raw.events",
   },
   extraction: {
-    intervalMinutes: 1,
+    intervalMinutes: 10,
     timeRange: "now-5m",
     maxResults: 1000,
     timeout: "30s",
     indexPattern: "synthetics-*",
-    monitorNamePattern: "*",
+    monitorNamePattern: "*prd*",
   },
   logging: {
     level: "info",
@@ -213,7 +215,10 @@ function loadConfigFromEnv(): Partial<Config> {
   const envConfig: Record<string, any> = {};
 
   // Helper function to safely parse environment variables
-  const getEnvConfig = (key: string, type: "string" | "number" | "boolean" | "array") => {
+  const getEnvConfig = (
+    key: string,
+    type: "string" | "number" | "boolean" | "array",
+  ) => {
     const value = getEnvValue(key);
     if (value === undefined) return undefined;
     return parseEnvVar(value, type);
@@ -225,12 +230,27 @@ function loadConfigFromEnv(): Partial<Config> {
     apiKeyId: getEnvConfig(envVarMapping.elasticsearch.apiKeyId, "string"),
     apiKey: getEnvConfig(envVarMapping.elasticsearch.apiKey, "string"),
     maxRetries: getEnvConfig(envVarMapping.elasticsearch.maxRetries, "number"),
-    requestTimeout: getEnvConfig(envVarMapping.elasticsearch.requestTimeout, "number"),
-    compression: getEnvConfig(envVarMapping.elasticsearch.compression, "boolean"),
-    sniffOnStart: getEnvConfig(envVarMapping.elasticsearch.sniffOnStart, "boolean"),
-    rejectUnauthorized: getEnvConfig(envVarMapping.elasticsearch.rejectUnauthorized, "boolean"),
+    requestTimeout: getEnvConfig(
+      envVarMapping.elasticsearch.requestTimeout,
+      "number",
+    ),
+    compression: getEnvConfig(
+      envVarMapping.elasticsearch.compression,
+      "boolean",
+    ),
+    sniffOnStart: getEnvConfig(
+      envVarMapping.elasticsearch.sniffOnStart,
+      "boolean",
+    ),
+    rejectUnauthorized: getEnvConfig(
+      envVarMapping.elasticsearch.rejectUnauthorized,
+      "boolean",
+    ),
     name: getEnvConfig(envVarMapping.elasticsearch.name, "string"),
-    opaqueIdPrefix: getEnvConfig(envVarMapping.elasticsearch.opaqueIdPrefix, "string"),
+    opaqueIdPrefix: getEnvConfig(
+      envVarMapping.elasticsearch.opaqueIdPrefix,
+      "string",
+    ),
   };
 
   // Load Kafka config
@@ -240,29 +260,47 @@ function loadConfigFromEnv(): Partial<Config> {
     ssl: getEnvConfig(envVarMapping.kafka.ssl, "boolean"),
     username: getEnvConfig(envVarMapping.kafka.username, "string"),
     password: getEnvConfig(envVarMapping.kafka.password, "string"),
-    connectionTimeout: getEnvConfig(envVarMapping.kafka.connectionTimeout, "number"),
-    authenticationTimeout: getEnvConfig(envVarMapping.kafka.authenticationTimeout, "number"),
+    connectionTimeout: getEnvConfig(
+      envVarMapping.kafka.connectionTimeout,
+      "number",
+    ),
+    authenticationTimeout: getEnvConfig(
+      envVarMapping.kafka.authenticationTimeout,
+      "number",
+    ),
     requestTimeout: getEnvConfig(envVarMapping.kafka.requestTimeout, "number"),
-    initialRetryTime: getEnvConfig(envVarMapping.kafka.initialRetryTime, "number"),
+    initialRetryTime: getEnvConfig(
+      envVarMapping.kafka.initialRetryTime,
+      "number",
+    ),
     retries: getEnvConfig(envVarMapping.kafka.retries, "number"),
     topicName: getEnvConfig(envVarMapping.kafka.topicName, "string"),
   };
 
   // Load Extraction config
   envConfig.extraction = {
-    intervalMinutes: getEnvConfig(envVarMapping.extraction.intervalMinutes, "number"),
+    intervalMinutes: getEnvConfig(
+      envVarMapping.extraction.intervalMinutes,
+      "number",
+    ),
     timeRange: getEnvConfig(envVarMapping.extraction.timeRange, "string"),
     maxResults: getEnvConfig(envVarMapping.extraction.maxResults, "number"),
     timeout: getEnvConfig(envVarMapping.extraction.timeout, "string"),
     indexPattern: getEnvConfig(envVarMapping.extraction.indexPattern, "string"),
-    monitorNamePattern: getEnvConfig(envVarMapping.extraction.monitorNamePattern, "string"),
+    monitorNamePattern: getEnvConfig(
+      envVarMapping.extraction.monitorNamePattern,
+      "string",
+    ),
   };
 
   // Load Logging config
   envConfig.logging = {
     level: getEnvConfig(envVarMapping.logging.level, "string"),
     format: getEnvConfig(envVarMapping.logging.format, "string"),
-    includeTimestamp: getEnvConfig(envVarMapping.logging.includeTimestamp, "boolean"),
+    includeTimestamp: getEnvConfig(
+      envVarMapping.logging.includeTimestamp,
+      "boolean",
+    ),
   };
 
   envConfig.metrics = {
@@ -277,7 +315,10 @@ function loadConfigFromEnv(): Partial<Config> {
 
   // Use Zod to validate and transform the config
   const result = ConfigSchema.safeParse({
-    elasticsearch: { ...defaultConfig.elasticsearch, ...envConfig.elasticsearch },
+    elasticsearch: {
+      ...defaultConfig.elasticsearch,
+      ...envConfig.elasticsearch,
+    },
     kafka: { ...defaultConfig.kafka, ...envConfig.kafka },
     extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
     logging: { ...defaultConfig.logging, ...envConfig.logging },
@@ -287,7 +328,10 @@ function loadConfigFromEnv(): Partial<Config> {
 
   if (!result.success) {
     console.error("Configuration validation failed:", result.error.format());
-    throw new Error("Invalid configuration: " + JSON.stringify(result.error.format(), null, 2));
+    throw new Error(
+      "Invalid configuration: " +
+        JSON.stringify(result.error.format(), null, 2),
+    );
   }
 
   return result.data;

@@ -11,6 +11,7 @@ import {
   validateMonitorInfo,
   ElasticsearchSourceSchema,
   writeInvalidRecords,
+  clearInvalidRecordsBuffer,
 } from "./types.js";
 import { config } from "./config.js";
 import { validateConnections } from "./validation.js";
@@ -39,6 +40,9 @@ initializeMetrics();
 async function extractAndProcessMonitors() {
   try {
     console.log("Starting synthetic monitor data extraction...");
+
+    // Clear the invalid records buffer at the start of each extraction
+    clearInvalidRecordsBuffer();
 
     // Only check connection if we haven't established one yet
     const client = getElasticsearchClient();
@@ -88,6 +92,7 @@ async function extractAndProcessMonitors() {
 async function fetchAllMonitorData() {
   const timeRange = config.extraction.timeRange;
   const size = config.extraction.maxResults;
+  const monitorNameWildcard = config.extraction.monitorNamePattern;
 
   try {
     // Build the query to get all synthetic monitors
@@ -102,7 +107,7 @@ async function fetchAllMonitorData() {
           must: [
             {
               wildcard: {
-                "monitor.name": "*DS - Kafka Connector - prd*",
+                "monitor.name": monitorNameWildcard,
               },
             },
             {
@@ -122,6 +127,7 @@ async function fetchAllMonitorData() {
       timeRange,
       size,
       index: config.extraction.indexPattern,
+      monitorNameWildcard,
     });
 
     // Use the client directly for more complex operations

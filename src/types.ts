@@ -285,6 +285,13 @@ export const ElasticsearchHitSchema = z.object({
   _source: ElasticsearchSourceSchema,
 });
 
+// Buffer to store invalid records during an extraction cycle
+let invalidRecordsBuffer: Array<{
+  timestamp: string;
+  monitorName?: string;
+  errors: Array<{ message: string }>;
+}> = [];
+
 // Helper function to write invalid records to file
 export async function writeInvalidRecords(type: string, errors: Array<{ message: string }>, monitorName?: string): Promise<void> {
   const timestamp = new Date().toISOString();
@@ -295,27 +302,19 @@ export async function writeInvalidRecords(type: string, errors: Array<{ message:
   };
 
   try {
-    // Read existing content if file exists
-    let existingContent: any[] = [];
-    try {
-      const fileContent = await fs.readFile('src/invalid.json', 'utf-8');
-      existingContent = JSON.parse(fileContent);
-      if (!Array.isArray(existingContent)) {
-        existingContent = [existingContent];
-      }
-    } catch (error) {
-      // File doesn't exist or is empty, start with empty array
-      existingContent = [];
-    }
-
-    // Append new invalid record
-    existingContent.push(invalidData);
-
-    // Write back to file
-    await fs.writeFile('src/invalid.json', JSON.stringify(existingContent, null, 2));
+    // Add to buffer
+    invalidRecordsBuffer.push(invalidData);
+    
+    // Write current buffer to file
+    await fs.writeFile('src/invalid.json', JSON.stringify(invalidRecordsBuffer, null, 2));
   } catch (error) {
     console.error('Error writing invalid records:', error);
   }
+}
+
+// Function to clear the invalid records buffer at the start of a new extraction
+export function clearInvalidRecordsBuffer(): void {
+  invalidRecordsBuffer = [];
 }
 
 // Validation functions
