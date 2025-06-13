@@ -274,11 +274,11 @@ export const ElasticsearchSourceSchema = z.object({
   url: ElasticsearchUrlSchema,
   "@timestamp": z.string(),
   tags: z.array(z.string()).optional(),
-  http: ElasticsearchHttpSchema,
-  tls: ElasticsearchTlsSchema,
-  agent: ElasticsearchAgentSchema,
-  observer: ElasticsearchObserverSchema,
-  meta: ElasticsearchMetaSchema,
+  http: ElasticsearchHttpSchema.optional(),
+  tls: ElasticsearchTlsSchema.optional(),
+  agent: ElasticsearchAgentSchema.optional(),
+  observer: ElasticsearchObserverSchema.optional(),
+  meta: ElasticsearchMetaSchema.optional(),
 });
 
 export const ElasticsearchHitSchema = z.object({
