@@ -210,7 +210,7 @@ export const ElasticsearchUrlSchema = z
 
 export const ElasticsearchHttpResponseSchema = z
   .object({
-    status_code: z.number(),
+    status_code: z.number().optional(),
     body: z
       .object({
         bytes: z.number().optional(),
@@ -237,7 +237,7 @@ export const ElasticsearchHttpSchema = z
 
 export const ElasticsearchTlsSchema = z
   .object({
-    established: z.boolean(),
+    established: z.boolean().optional(),
     version: z.string().optional(),
   })
   .optional();
@@ -324,7 +324,7 @@ export async function validateElasticsearchHits(data: unknown[]): Promise<Elasti
 
   for (const hit of data) {
     try {
-      const validatedHit = ElasticsearchHitSchema.parse(hit);
+      const validatedHit = ElasticsearchHitSchema.parse(hit) as ElasticsearchHit;
       validHits.push(validatedHit);
     } catch (error) {
       // Try to get monitor name even from invalid hit
@@ -337,10 +337,10 @@ export async function validateElasticsearchHits(data: unknown[]): Promise<Elasti
 
       if (error instanceof z.ZodError) {
         error.issues.forEach(issue => {
-          errorsByMonitor[monitorName].add(`${issue.path.join('.')}: ${issue.message}`);
+          errorsByMonitor[monitorName]?.add(`${issue.path.join('.')}: ${issue.message}`);
         });
       } else {
-        errorsByMonitor[monitorName].add(String(error));
+        errorsByMonitor[monitorName]?.add(String(error));
       }
     }
   }
