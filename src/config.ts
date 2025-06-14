@@ -47,6 +47,7 @@ const KafkaConfigSchema = z
     initialRetryTime: z.number().min(100).max(10000).default(1000),
     retries: z.number().min(0).max(20).default(8),
     topicName: z.string().min(1).default("monitoring.raw.events"),
+    maxMessageSize: z.number().min(1024).max(10485760).default(5242880),
   })
   .refine(
     (data) => {
@@ -63,8 +64,8 @@ const KafkaConfigSchema = z
   );
 
 const ExtractionConfigSchema = z.object({
-  intervalMinutes: z.number().min(1).max(60).default(1),
-  timeRange: z.string().default("now-2m"),
+  intervalMinutes: z.number().min(1).max(60).default(2),
+  timeRange: z.string().default("now-5m"),
   maxResults: z.number().min(1).max(10000).default(1000),
   timeout: z.string().default("30s"),
   indexPattern: z.string().default("synthetics-*"),
@@ -118,6 +119,7 @@ const defaultConfig: Config = {
     initialRetryTime: 1000,
     retries: 8,
     topicName: "monitoring.raw.events",
+    maxMessageSize: 5242880,
   },
   extraction: {
     intervalMinutes: 10,
@@ -166,6 +168,7 @@ const envVarMapping = {
     initialRetryTime: "KAFKA_INITIAL_RETRY_TIME",
     retries: "KAFKA_RETRIES",
     topicName: "KAFKA_TOPIC_NAME",
+    maxMessageSize: "KAFKA_MAX_MESSAGE_SIZE",
   },
   extraction: {
     intervalMinutes: "EXTRACTION_INTERVAL_MINUTES",
@@ -275,6 +278,7 @@ function loadConfigFromEnv(): Partial<Config> {
     ),
     retries: getEnvConfig(envVarMapping.kafka.retries, "number"),
     topicName: getEnvConfig(envVarMapping.kafka.topicName, "string"),
+    maxMessageSize: getEnvConfig(envVarMapping.kafka.maxMessageSize, "number"),
   };
 
   // Load Extraction config

@@ -2,10 +2,9 @@
 
 import { Client, estypes } from "@elastic/elasticsearch";
 import { HttpConnection } from "@elastic/transport";
+import type { MonitorInfo, SourceDocument, ElasticsearchHit } from "./types";
 import {
   type BusinessContext,
-  type MonitorInfo,
-  type ElasticsearchHit,
   type SearchResponse,
   validateElasticsearchHits,
   validateMonitorInfo,
@@ -13,6 +12,7 @@ import {
   writeInvalidRecords,
   clearInvalidRecordsBuffer,
 } from "./types.js";
+import type { InvalidRecord } from "./types.js";
 import { config } from "./config.js";
 import { validateConnections } from "./validation.js";
 import {
@@ -118,8 +118,41 @@ async function fetchAllMonitorData() {
               },
             },
           ],
+          // Make sure we're only getting synthetic monitoring data
+          filter: [
+            {
+              terms: {
+                "data_stream.dataset": ["http", "browser", "icmp", "tcp"],
+              },
+            },
+            {
+              term: {
+                "data_stream.type": "synthetics",
+              },
+            },
+          ],
         },
       },
+      // Include all the fields we need
+      _source: [
+        "monitor",
+        "url",
+        "@timestamp",
+        "tags",
+        "http",
+        "tcp",
+        "icmp",
+        "synthetics",
+        "tls",
+        "agent",
+        "observer",
+        "meta",
+        "summary",
+        "state",
+        "data_stream",
+        "ecs",
+        "config_id",
+      ],
     };
 
     console.log("Executing Elasticsearch query...");
@@ -153,8 +186,17 @@ async function fetchAllMonitorData() {
     // Pass through raw hits without transformation
     const rawHits = response.hits.hits.map(hit => ({ _source: hit._source }));
 
+    // Validate the Elasticsearch hits using the old validation method
     const validatedHits = await validateElasticsearchHits(rawHits);
     console.log(`Validated ${validatedHits.length} Elasticsearch hits`);
+
+    // Count by dataset type
+    const datasetCounts: Record<string, number> = {};
+    validatedHits.forEach(hit => {
+      const dataset = hit._source.data_stream?.dataset || "unknown";
+      datasetCounts[dataset] = (datasetCounts[dataset] || 0) + 1;
+    });
+    console.log("Hits by dataset type:", datasetCounts);
 
     return validatedHits;
   } catch (error: any) {
@@ -223,45 +265,72 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
         id: hit._source.monitor.id,
         name: hit._source.monitor.name,
         type: hit._source.monitor.type,
-        url: hit._source.url?.full,
+        url: hit._source.url || {
+          scheme: undefined,
+          domain: undefined,
+          port: undefined,
+          path: undefined,
+          full: undefined
+        },
         timestamp: hit._source["@timestamp"],
         status: hit._source.monitor.status,
         duration: hit._source.monitor.duration?.us || 0,
+        dataset: hit._source.data_stream?.dataset || "synthetics",
         businessContext,
         tags: hit._source.tags || [],
-        environment: hit._source.observer?.geo?.name || "unknown",
-        http: hit._source.http?.response
+        checkGroup: hit._source.monitor.check_group || "",
+        fleetManaged: hit._source.monitor.fleet_managed || false,
+        origin: hit._source.monitor.origin || "",
+        project: hit._source.monitor.project || { id: "", name: "" },
+        timespan: hit._source.monitor.timespan || { gte: "", lt: "" },
+        agent: hit._source.agent || { id: "unknown" },
+        observer: hit._source.observer || { geo: {} },
+        state: hit._source.monitor?.state || {},
+        summary: hit._source.monitor?.summary || {},
+        meta: hit._source.meta || {},
+        event: hit._source.event || {},
+        ecs: hit._source.ecs || {},
+        dataStream: hit._source.data_stream || {},
+        configId: hit._source.config_id,
+        tls: hit._source.tls,
+        http: hit._source.http
           ? {
-              statusCode: hit._source.http.response.status_code,
-              responseTime: hit._source.http.rtt?.total?.us,
-              body: hit._source.http.response.body,
+              rtt: hit._source.http.rtt,
+              response: hit._source.http.response,
+              tls: hit._source.http.tls,
+              state: hit._source.http.state || {},
+              event: hit._source.http.event || {}
             }
           : undefined,
-        tls: hit._source.tls
+        tcp: hit._source.tcp
           ? {
-              established: hit._source.tls.established,
-              version: hit._source.tls.version,
+              rtt: hit._source.tcp.rtt,
+              ip: hit._source.monitor.ip,
+              port: typeof hit._source.url?.port === 'string' ? parseInt(hit._source.url.port, 10) : hit._source.url?.port,
+              url: hit._source.url || {
+                scheme: undefined,
+                domain: undefined,
+                port: undefined,
+                path: undefined,
+                full: undefined
+              }
             }
           : undefined,
-        agent: hit._source.agent
+        icmp: hit._source.icmp
           ? {
-              name: hit._source.agent.name,
-              id: hit._source.agent.id,
-              type: hit._source.agent.type,
-              version: hit._source.agent.version,
+              rtt: hit._source.icmp.rtt,
+              requests: hit._source.icmp.requests,
+              ip: hit._source.monitor.ip,
+              url: hit._source.url || {
+                scheme: undefined,
+                domain: undefined,
+                port: undefined,
+                path: undefined,
+                full: undefined
+              }
             }
           : undefined,
-        observer: hit._source.observer
-          ? {
-              name: hit._source.observer.name,
-              geo: hit._source.observer.geo?.name,
-            }
-          : undefined,
-        meta: hit._source.meta
-          ? {
-              space_id: hit._source.meta.space_id,
-            }
-          : undefined,
+        browser: hit._source.browser
       };
 
       transformedData.push(transformedMonitor);
@@ -321,14 +390,14 @@ async function startExtractionProcess() {
     // Set up interval for regular extraction
     const intervalMinutes = config.extraction.intervalMinutes;
     console.log(
-      `Setting up extraction to run every ${intervalMinutes} minute(s)`,
+      `Setting up extraction to run every ${intervalMinutes} minute(s)`
     );
 
     // Store the interval ID so we can clear it if needed
     const intervalId = setInterval(
       async () => {
         console.log(
-          `\n🕒 Running scheduled extraction (every ${intervalMinutes} minutes)...`,
+          `\n🕒 Running scheduled extraction (every ${intervalMinutes} minutes)...`
         );
         try {
           await extractAndProcessMonitors();
@@ -337,11 +406,11 @@ async function startExtractionProcess() {
           console.error(`❌ Scheduled extraction failed:`, error);
         }
       },
-      intervalMinutes * 60 * 1000,
+      intervalMinutes * 60 * 1000
     );
 
     console.log(
-      `✅ Extraction interval set up successfully - will run every ${intervalMinutes} minute(s)`,
+      `✅ Extraction interval set up successfully - will run every ${intervalMinutes} minute(s)`
     );
 
     // Clean up interval on process termination

@@ -148,18 +148,14 @@ function createSafeId(name) {
   }
 }
 
-// Normalize status values to consistent format
+// Normalize status values to consistent format - simplified to just up/down
 function normalizeStatus(status) {
-  const statusMap = {
-    up: "up",
-    down: "down",
-    degraded: "degraded",
-    warning: "degraded",
-    critical: "down",
-    healthy: "up"
-  };
-
-  return statusMap[status] || "unknown";
+  // Convert any status to just up or down
+  if (status === "up" || status === "healthy") {
+    return "up";
+  }
+  // All other statuses (down, degraded, warning, critical, etc.) become "down"
+  return "down";
 }
 
 // Update service document - primary record of service status
@@ -182,6 +178,23 @@ function updateServiceDocument(
     } catch (e) {
       serviceDoc = null;
     }
+    
+    // Extract the HTTP body content from the nested structure
+    let bodyContent = null;
+    if (doc.http && doc.http.body && doc.http.body.content) {
+      bodyContent = doc.http.body.content;
+      
+      // Try to parse the JSON content if it's a string
+      try {
+        if (typeof bodyContent === 'string' && 
+            (bodyContent.startsWith('{') || bodyContent.startsWith('['))) {
+          bodyContent = JSON.parse(bodyContent);
+        }
+      } catch (parseError) {
+        // If parsing fails, keep it as a string
+        logError("Error parsing body content JSON", serviceId, parseError);
+      }
+    }
 
     if (!serviceDoc) {
       // Create new service document
@@ -202,11 +215,28 @@ function updateServiceDocument(
           availability: 100.0, // Store as decimal percentage
           error_rate: 0.0      // Store as decimal percentage
         },
-        monitors: {}
+        monitors: {},
+        // Add the extracted body content
+        body_content: bodyContent
       };
+    } else {
+      // Update the existing document with all relevant fields
+      // Keep track of existing monitors to preserve other monitor statuses
+      const existingMonitors = serviceDoc.monitors || {};
+      
+      // Update all fields while preserving document history
+      serviceDoc.name = serviceName; // Update name in case it changed
+      serviceDoc.domain_id = domainId;
+      serviceDoc.department_id = departmentId;
+      serviceDoc.body_content = bodyContent;
+      
+      // Preserve creation timestamp
+      if (!serviceDoc.created_at) {
+        serviceDoc.created_at = timestamp;
+      }
     }
 
-    // Update monitor information
+    // Update monitor information (same for both new and existing documents)
     if (!serviceDoc.monitors) {
       serviceDoc.monitors = {};
     }
@@ -286,6 +316,23 @@ function updateCurrentStateDocument(
     } catch (e) {
       statusDoc = null;
     }
+    
+    // Extract the HTTP body content from the nested structure
+    let bodyContent = null;
+    if (doc.http && doc.http.body && doc.http.body.content) {
+      bodyContent = doc.http.body.content;
+      
+      // Try to parse the JSON content if it's a string
+      try {
+        if (typeof bodyContent === 'string' && 
+            (bodyContent.startsWith('{') || bodyContent.startsWith('['))) {
+          bodyContent = JSON.parse(bodyContent);
+        }
+      } catch (parseError) {
+        // If parsing fails, keep it as a string
+        logError("Error parsing body content JSON for current_state", serviceId, parseError);
+      }
+    }
 
     if (!statusDoc) {
       // Create new status document
@@ -312,8 +359,12 @@ function updateCurrentStateDocument(
           last_alert: null
         },
         business_context: doc.businessContext || {},
-        monitors: {}
+        monitors: {},
+        body_content: bodyContent
       };
+    } else {
+      // Update body content in existing document
+      statusDoc.body_content = bodyContent;
     }
 
     // Update monitor information
@@ -393,9 +444,8 @@ function updateDepartmentDocument(
         status: "unknown",
         service_refs: {},
         metrics: {
-          healthy: 0,
-          warning: 0,
-          critical: 0,
+          up_count: 0,
+          down_count: 0,
           total: 0
         },
         created_at: timestamp,
@@ -418,9 +468,8 @@ function updateDepartmentDocument(
     // FIX: Reset counts and recalculate based on actual service refs
     if (!departmentDoc.metrics) {
       departmentDoc.metrics = {
-        healthy: 0,
-        warning: 0,
-        critical: 0,
+        up_count: 0,
+        down_count: 0,
         total: 0
       };
     }
@@ -428,35 +477,30 @@ function updateDepartmentDocument(
     const metrics = departmentDoc.metrics;
     
     // Reset counters
-    metrics.healthy = 0;
-    metrics.warning = 0;
-    metrics.critical = 0;
+    metrics.up_count = 0;
+    metrics.down_count = 0;
     
     // Count services by status
     Object.keys(departmentDoc.service_refs).forEach(svcId => {
       const svcStatus = departmentDoc.service_refs[svcId].status;
       if (svcStatus === "up") {
-        metrics.healthy++;
-      } else if (svcStatus === "degraded") {
-        metrics.warning++;
+        metrics.up_count++;
       } else if (svcStatus === "down") {
-        metrics.critical++;
+        metrics.down_count++;
       }
     });
     
     // Ensure total count is accurate
     metrics.total = Object.keys(departmentDoc.service_refs).length;
 
-    // Update department status based on metrics
-    departmentDoc.status = 
-      metrics.critical > 0 ? "critical" : 
-      metrics.warning > 0 ? "warning" : "healthy";
+    // Update department status based on metrics - if any service is down, department is down
+    departmentDoc.status = metrics.down_count > 0 ? "down" : "up";
     
     departmentDoc.updated_at = timestamp;
 
     // Update trend data with availability percentage
     const availabilityPercent = metrics.total > 0 ?
-      (metrics.healthy / metrics.total * 100) : 100.0;
+      (metrics.up_count / metrics.total * 100) : 100.0;
       
     updateTrendData(departmentDoc.trend, availabilityPercent, timestamp);
 
@@ -494,9 +538,8 @@ function updateDomainDocument(
         department_refs: {},
         overall_status: "unknown",
         metrics: {
-          healthy_departments: 0,
-          warning_departments: 0,
-          critical_departments: 0,
+          up_departments: 0,
+          down_departments: 0,
           total_departments: 0,
           availability_percent: 100.0 // Use decimal percentage
         },
@@ -534,9 +577,8 @@ function updateDomainDocument(
     // FIX: Reset counts and recalculate based on actual department refs
     if (!domainDoc.metrics) {
       domainDoc.metrics = {
-        healthy_departments: 0,
-        warning_departments: 0,
-        critical_departments: 0,
+        up_departments: 0,
+        down_departments: 0,
         total_departments: 0,
         availability_percent: 100.0
       };
@@ -545,19 +587,16 @@ function updateDomainDocument(
     const metrics = domainDoc.metrics;
     
     // Reset counters
-    metrics.healthy_departments = 0;
-    metrics.warning_departments = 0;
-    metrics.critical_departments = 0;
+    metrics.up_departments = 0;
+    metrics.down_departments = 0;
     
     // Count departments by status
     Object.keys(domainDoc.department_refs).forEach(deptId => {
       const deptStatus = domainDoc.department_refs[deptId].status;
-      if (deptStatus === "healthy") {
-        metrics.healthy_departments++;
-      } else if (deptStatus === "warning") {
-        metrics.warning_departments++;
-      } else if (deptStatus === "critical") {
-        metrics.critical_departments++;
+      if (deptStatus === "up") {
+        metrics.up_departments++;
+      } else if (deptStatus === "down") {
+        metrics.down_departments++;
       }
     });
     
@@ -567,16 +606,14 @@ function updateDomainDocument(
     // Calculate availability percentage (as a decimal percentage)
     if (metrics.total_departments > 0) {
       metrics.availability_percent = formatPercentage(
-        (metrics.healthy_departments / metrics.total_departments) * 100
+        (metrics.up_departments / metrics.total_departments) * 100
       );
     } else {
       metrics.availability_percent = 100.0; // Default if no departments
     }
 
-    // Update overall domain status
-    domainDoc.overall_status = 
-      metrics.critical_departments > 0 ? "critical" : 
-      metrics.warning_departments > 0 ? "warning" : "healthy";
+    // Update overall domain status - if any department is down, domain is down
+    domainDoc.overall_status = metrics.down_departments > 0 ? "down" : "up";
     
     domainDoc.updated_at = timestamp;
 
@@ -1220,33 +1257,30 @@ function removeAlertRefFromCurrentState(serviceId, alertId) {
   }
 }
 
-// Calculate overall status based on monitors
+// Calculate overall status based on monitors - simplified to up/down only
 function calculateOverallStatus(monitors) {
   if (!monitors || typeof monitors !== "object") {
     return "unknown";
   }
 
   try {
-    let hasDown = false;
-    let hasDegraded = false;
-    
+    // If any monitor is down, the service is down
     for (const monitorId in monitors) {
       const monitor = monitors[monitorId];
       if (monitor && monitor.status === "down") {
-        hasDown = true;
-      } else if (monitor && monitor.status === "degraded") {
-        hasDegraded = true;
+        return "down";
       }
     }
-
-    if (hasDown) return "down";
-    if (hasDegraded) return "degraded";
+    
+    // If we get here, all monitors are up
     return "up";
   } catch (e) {
     logError("Error in calculateOverallStatus", e);
     return "unknown";
   }
-}// Generate trend data for departments/domains
+}
+
+// Generate trend data for departments/domains
 function generateTrendData(minValue = 95.0, maxValue = 100.0) {
   try {
     const points = [];
@@ -1403,6 +1437,25 @@ function repairDomainDocuments() {
           });
         }
         
+        // Convert metrics fields to use up/down terminology
+        if (domainDoc.metrics) {
+          const metrics = domainDoc.metrics;
+          
+          // Create up/down fields if they don't exist
+          if (metrics.healthy_departments !== undefined && metrics.up_departments === undefined) {
+            metrics.up_departments = metrics.healthy_departments;
+          }
+          
+          if (metrics.critical_departments !== undefined && metrics.down_departments === undefined) {
+            metrics.down_departments = metrics.critical_departments;
+          }
+          
+          // Remove old fields
+          delete metrics.healthy_departments;
+          delete metrics.warning_departments;
+          delete metrics.critical_departments;
+        }
+        
         // Save repaired document
         domains[id] = domainDoc;
         log(`Repaired domain document: ${id}`);
@@ -1435,38 +1488,50 @@ function repairDepartmentDocuments() {
         if (!deptDoc) return;
         
         // Reset counters
-        let healthy = 0;
-        let warning = 0;
-        let critical = 0;
+        let up_count = 0;
+        let down_count = 0;
         
         // Count services by status if service_refs exists
         if (deptDoc.service_refs) {
           Object.keys(deptDoc.service_refs).forEach(svcId => {
             const svcStatus = deptDoc.service_refs[svcId].status;
             if (svcStatus === "up") {
-              healthy++;
-            } else if (svcStatus === "degraded") {
-              warning++;
+              up_count++;
             } else if (svcStatus === "down") {
-              critical++;
+              down_count++;
             }
           });
           
           // Ensure metrics object exists
           if (!deptDoc.metrics) {
             deptDoc.metrics = {
-              healthy: 0,
-              warning: 0,
-              critical: 0,
+              up_count: 0,
+              down_count: 0,
               total: 0
             };
           }
           
           // Update metrics
-          deptDoc.metrics.healthy = healthy;
-          deptDoc.metrics.warning = warning;
-          deptDoc.metrics.critical = critical;
+          deptDoc.metrics.up_count = up_count;
+          deptDoc.metrics.down_count = down_count;
           deptDoc.metrics.total = Object.keys(deptDoc.service_refs).length;
+          
+          // Update status
+          deptDoc.status = down_count > 0 ? "down" : "up";
+          
+          // Convert metrics fields to use up/down terminology
+          if (deptDoc.metrics.healthy !== undefined && deptDoc.metrics.up_count === undefined) {
+            deptDoc.metrics.up_count = deptDoc.metrics.healthy;
+          }
+          
+          if (deptDoc.metrics.critical !== undefined && deptDoc.metrics.down_count === undefined) {
+            deptDoc.metrics.down_count = deptDoc.metrics.critical;
+          }
+          
+          // Remove old fields
+          delete deptDoc.metrics.healthy;
+          delete deptDoc.metrics.warning;
+          delete deptDoc.metrics.critical;
         }
         
         // Fix trend data
@@ -1490,6 +1555,7 @@ function repairDepartmentDocuments() {
     logError("Error in repairDepartmentDocuments", e);
   }
 }
+
 // Repair service documents
 function repairServiceDocuments() {
   try {
@@ -1520,6 +1586,13 @@ function repairServiceDocuments() {
           }
         }
         
+        // Update status to just up/down
+        if (serviceDoc.status === "degraded" || serviceDoc.status === "warning") {
+          serviceDoc.status = "down";
+        } else if (serviceDoc.status === "healthy") {
+          serviceDoc.status = "up";
+        }
+        
         // Save repaired document
         services[id] = serviceDoc;
         log(`Repaired service document: ${id}`);
@@ -1531,6 +1604,3 @@ function repairServiceDocuments() {
     logError("Error in repairServiceDocuments", e);
   }
 }
-
-
-

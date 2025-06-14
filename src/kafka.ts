@@ -9,6 +9,7 @@ import {
 import { config } from "./config.js";
 import { kafkaMessageSizeHistogram } from "./metrics.js";
 import type { MonitorInfo } from "./types.js";
+import { writeInvalidRecords } from "./types.js";
 import { z } from "zod";
 
 // Define Zod schemas for Kafka messages
@@ -38,6 +39,7 @@ export function getKafkaProducer(): KafkaProducer {
       clientId: config.kafka.clientId,
       bootstrapBrokers: config.kafka.brokers,
       serializers: stringSerializers,
+      compression: "gzip",
 
       // @platformatic/kafka already handles:
       // - Connection pooling
@@ -127,6 +129,25 @@ function sanitizeKey(key: string): string {
     .replace(/[^a-z0-9:-]/g, ""); // Remove all except lowercase letters, numbers, colon, dash
 }
 
+function createMessageKey(monitor: MonitorInfo): string {
+  const domain = monitor.businessContext.domain;
+  const timestamp = new Date(monitor.timestamp).getTime();
+  const rawKey = `raw::${domain}::${monitor.name}::${timestamp}`;
+  return sanitizeKey(rawKey);
+}
+
+function createMessageHeaders(monitor: MonitorInfo): Map<string, string> {
+  return new Map([
+    ["monitor-type", monitor.type],
+    ["status", monitor.status],
+    ["domain", monitor.businessContext.domain || "unknown"],
+    ["department", monitor.businessContext.department || "unknown"],
+    ["environment", monitor.businessContext.environment || ""],
+    ["dataset", monitor.dataset || monitor.type],
+    ["criticality", monitor.businessContext.criticality],
+  ]);
+}
+
 /**
  * Send monitor data to a single Kafka topic
  * Domain-specific routing will be handled downstream with Kafka Streams
@@ -163,13 +184,23 @@ export async function sendMonitorDataToKafka(
         );
       }
 
+      // Log the message being sent
+      console.log('Sending message to Kafka:', {
+        key: uniqueKey,
+        type: item.type,
+        url: item.url,
+        tcp: item.tcp,
+        icmp: item.icmp,
+        http: item.http
+      });
+
       // Include domain and other metadata in headers for downstream filtering
       const headers = new Map([
         ["monitor-type", item.type],
         ["status", item.status],
         ["domain", domain],
         ["department", department],
-        ["environment", item.environment],
+        ["environment", item.businessContext.environment]
       ]);
 
       return createKafkaMessage(
