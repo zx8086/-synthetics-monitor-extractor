@@ -33,11 +33,6 @@ export interface MonitorInfo {
   http?: {
     statusCode?: number;
     responseTime?: number;
-    body?: {
-      bytes?: number;
-      content?: any;
-      hash?: string;
-    };
     response?: {
       status_code?: number;
       mime_type?: string;
@@ -235,13 +230,6 @@ export const MonitorInfoSchema = z.object({
     .object({
       statusCode: z.number().optional(),
       responseTime: z.number().optional(),
-      body: z
-        .object({
-          bytes: z.number().optional(),
-          content: z.any().optional(),
-          hash: z.string().optional(),
-        })
-        .optional(),
       response: z
         .object({
           status_code: z.number().optional(),
@@ -1012,8 +1000,6 @@ export interface SourceDocument {
       id: string;
       name: string;
     };
-    state?: Record<string, any>;
-    summary?: Record<string, any>;
   };
   agent?: {
     id: string;
@@ -1023,7 +1009,9 @@ export interface SourceDocument {
     version?: string;
   };
   observer?: {
-    geo: Record<string, any>;
+    geo?: {
+      name?: string;
+    };
     hostname?: string;
     ip?: string;
     name?: string;
@@ -1078,7 +1066,6 @@ export interface SourceDocument {
       version_protocol?: string;
     };
     state?: Record<string, any>;
-    event?: Record<string, any>;
   };
   tcp?: {
     rtt?: {
@@ -1132,12 +1119,48 @@ export interface SourceDocument {
     version_protocol?: string;
   };
   browser?: Record<string, any>;
-  meta?: Record<string, any>;
-  event?: Record<string, any>;
-  ecs?: Record<string, any>;
-  data_stream?: Record<string, any>;
+  meta?: {
+    space_id: string;
+  };
+  event?: {
+    agent_id_status?: string;
+    ingested?: string;
+    type?: string;
+    dataset?: string;
+  };
+  ecs?: {
+    version?: string;
+  };
+  data_stream?: {
+    namespace?: string;
+    type?: string;
+    dataset?: string;
+  };
   tags?: string[];
   config_id?: string;
+  summary?: {
+    retry_group?: string;
+    max_attempts?: number;
+    up?: number;
+    down?: number;
+    attempt?: number;
+    final_attempt?: boolean;
+    status?: string;
+  };
+  state?: {
+    duration_ms?: string;
+    checks?: number;
+    ends?: any;
+    started_at?: string;
+    up?: number;
+    id?: string;
+    down?: number;
+    flap_history?: any[];
+    status?: string;
+  };
+  synthetics?: {
+    type?: string;
+  };
 }
 
 

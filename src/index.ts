@@ -211,8 +211,6 @@ async function fetchAllMonitorData() {
   }
 }
 
-
-
 export function extractBusinessContext(source: ElasticsearchHit["_source"]): BusinessContext {
   const tags = source.tags || [];
   const missingFields: string[] = [];
@@ -285,30 +283,13 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
           ? {
               statusCode: hit._source.http.response?.status_code,
               responseTime: hit._source.http.rtt?.total?.us,
-              body: hit._source.http.response?.body
-                ? {
-                    bytes: hit._source.http.response.body.bytes,
-                    content: hit._source.http.response.body.content,
-                    hash: hit._source.http.response.body.hash,
-                  }
-                : undefined,
               response: hit._source.http.response,
               rtt: hit._source.http.rtt,
               state: hit._source.http.state,
             }
           : undefined,
 
-        tls: hit._source.tls
-          ? {
-              established: hit._source.tls.established,
-              version: hit._source.tls.version,
-              cipher: hit._source.tls.cipher,
-              certificate_not_valid_before: hit._source.tls.certificate_not_valid_before,
-              certificate_not_valid_after: hit._source.tls.certificate_not_valid_after,
-              version_protocol: hit._source.tls.version_protocol,
-              server: hit._source.tls.server,
-            }
-          : undefined,
+        tls: hit._source.tls,
 
         tcp: hit._source.tcp,
 
@@ -330,10 +311,10 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
 
         agent: hit._source.agent
           ? {
-              name: hit._source.agent.name,
+              name: hit._source.agent.name || "",
               id: hit._source.agent.id,
-              type: hit._source.agent.type,
-              version: hit._source.agent.version,
+              type: hit._source.agent.type || "",
+              version: hit._source.agent.version || "",
               ephemeral_id: hit._source.agent.ephemeral_id,
             }
           : undefined,
