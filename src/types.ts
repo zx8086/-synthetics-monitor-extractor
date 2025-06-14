@@ -23,31 +23,169 @@ export interface MonitorInfo {
   businessContext: BusinessContext;
   tags: string[];
   environment: string;
+  
   http?: {
     statusCode?: number;
     responseTime?: number;
     body?: {
       bytes?: number;
       content?: any;
+      hash?: string;
+    };
+    response?: {
+      status_code?: number;
+      mime_type?: string;
+      headers?: Record<string, string>;
+      body?: {
+        bytes?: number;
+        content?: any;
+        hash?: string;
+      };
+    };
+    rtt?: {
+      total?: {
+        us?: number;
+      };
+    };
+    state?: {
+      duration_ms?: string;
+      checks?: number;
+      ends?: any;
+      started_at?: string;
+      up?: number;
+      id?: string;
+      down?: number;
+      flap_history?: any[];
+      status?: string;
     };
   };
+  
   tls?: {
-    established: boolean;
+    established?: boolean;
+    version?: string;
+    cipher?: string;
+    certificate_not_valid_before?: string;
+    certificate_not_valid_after?: string;
+    version_protocol?: string;
+    server?: {
+      x509?: {
+        not_after?: string;
+        not_before?: string;
+        public_key_exponent?: number;
+        public_key_algorithm?: string;
+        public_key_size?: number;
+        signature_algorithm?: string;
+        serial_number?: string;
+        subject?: {
+          distinguished_name?: string;
+          common_name?: string;
+        };
+        issuer?: {
+          distinguished_name?: string;
+          common_name?: string;
+        };
+      };
+      hash?: {
+        sha1?: string;
+        sha256?: string;
+      };
+    };
+  };
+  
+  tcp?: {
+    rtt?: {
+      connect?: {
+        us?: number;
+      };
+    };
+  };
+  
+  icmp?: {
+    rtt?: {
+      us?: number;
+    };
+    requests?: number;
+  };
+  
+  synthetics?: {
+    type?: string;
+  };
+  
+  summary?: {
+    retry_group?: string;
+    max_attempts?: number;
+    up?: number;
+    down?: number;
+    attempt?: number;
+    final_attempt?: boolean;
+    status?: string;
+  };
+  
+  state?: {
+    duration_ms?: string;
+    checks?: number;
+    ends?: any;
+    started_at?: string;
+    up?: number;
+    id?: string;
+    down?: number;
+    flap_history?: any[];
+    status?: string;
+  };
+  
+  event?: {
+    agent_id_status?: string;
+    ingested?: string;
+    type?: string;
+    dataset?: string;
+  };
+  
+  data_stream?: {
+    namespace?: string;
+    type?: string;
+    dataset?: string;
+  };
+  
+  ecs?: {
     version?: string;
   };
+  
+  config_id?: string;
+  
   agent?: {
     name: string;
     id: string;
     type: string;
     version: string;
+    ephemeral_id?: string;
   };
+  
   observer?: {
     name: string;
     geo?: string;
   };
+  
   meta?: {
     space_id: string;
   };
+  
+  project?: {
+    name?: string;
+    id?: string;
+  };
+  
+  timespan?: {
+    lt?: string;
+    gte?: string;
+  };
+  
+  check_group?: string;
+  
+  fleet_managed?: boolean;
+  
+  origin?: string;
+  
+  ip?: string;
 }
 
 export interface ElasticsearchHit {
@@ -58,43 +196,163 @@ export interface ElasticsearchHit {
       type: string;
       status: string;
       duration?: { us: number };
+      origin?: string;
+      project?: {
+        name?: string;
+        id?: string;
+      };
+      timespan?: {
+        lt?: string;
+        gte?: string;
+      };
+      check_group?: string;
+      fleet_managed?: boolean;
+      ip?: string;
     };
     url?: {
       full?: string;
       domain?: string;
       path?: string;
+      scheme?: string;
+      port?: number;
     };
     "@timestamp": string;
     tags?: string[];
+    
     http?: {
       response?: {
-        status_code: number;
+        status_code?: number;
+        mime_type?: string;
+        headers?: Record<string, string>;
         body?: {
           bytes?: number;
           content?: any;
+          hash?: string;
         };
       };
-      rtt?: { total?: { us: number } };
+      rtt?: { 
+        total?: { us?: number };
+      };
+      state?: {
+        duration_ms?: string;
+        checks?: number;
+        ends?: any;
+        started_at?: string;
+        up?: number;
+        id?: string;
+        down?: number;
+        flap_history?: any[];
+        status?: string;
+      };
     };
+    
     tls?: {
-      established: boolean;
+      established?: boolean;
+      version?: string;
+      cipher?: string;
+      certificate_not_valid_before?: string;
+      certificate_not_valid_after?: string;
+      version_protocol?: string;
+      server?: {
+        x509?: {
+          not_after?: string;
+          not_before?: string;
+          public_key_exponent?: number;
+          public_key_algorithm?: string;
+          public_key_size?: number;
+          signature_algorithm?: string;
+          serial_number?: string;
+          subject?: {
+            distinguished_name?: string;
+            common_name?: string;
+          };
+          issuer?: {
+            distinguished_name?: string;
+            common_name?: string;
+          };
+        };
+        hash?: {
+          sha1?: string;
+          sha256?: string;
+        };
+      };
+    };
+    
+    tcp?: {
+      rtt?: {
+        connect?: {
+          us?: number;
+        };
+      };
+    };
+    
+    icmp?: {
+      rtt?: {
+        us?: number;
+      };
+      requests?: number;
+    };
+    
+    synthetics?: {
+      type?: string;
+    };
+    
+    summary?: {
+      retry_group?: string;
+      max_attempts?: number;
+      up?: number;
+      down?: number;
+      attempt?: number;
+      final_attempt?: boolean;
+      status?: string;
+    };
+    
+    state?: {
+      duration_ms?: string;
+      checks?: number;
+      ends?: any;
+      started_at?: string;
+      up?: number;
+      id?: string;
+      down?: number;
+      flap_history?: any[];
+      status?: string;
+    };
+    
+    event?: {
+      agent_id_status?: string;
+      ingested?: string;
+      type?: string;
+      dataset?: string;
+    };
+    
+    data_stream?: {
+      namespace?: string;
+      type?: string;
+      dataset?: string;
+    };
+    
+    ecs?: {
       version?: string;
     };
+    
+    config_id?: string;
+    
     agent?: {
       name: string;
       id: string;
       type: string;
-      ephemeral_id: string;
+      ephemeral_id?: string;
       version: string;
     };
     observer?: {
       geo?: {
-        name: string;
+        name?: string;
       };
-      name: string;
+      name?: string;
     };
     meta?: {
-      space_id: string;
+      space_id?: string;
     };
   };
 }
@@ -157,22 +415,170 @@ export const MonitorInfoSchema = z.object({
         .object({
           bytes: z.number().optional(),
           content: z.any().optional(),
+          hash: z.string().optional(),
+        })
+        .optional(),
+      response: z
+        .object({
+          status_code: z.number().optional(),
+          mime_type: z.string().optional(),
+          headers: z.record(z.string()).optional(),
+          body: z
+            .object({
+              bytes: z.number().optional(),
+              content: z.any().optional(),
+              hash: z.string().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+      rtt: z
+        .object({
+          total: z
+            .object({
+              us: z.number().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+      state: z
+        .object({
+          duration_ms: z.string().optional(),
+          checks: z.number().optional(),
+          ends: z.any().optional(),
+          started_at: z.string().optional(),
+          up: z.number().optional(),
+          id: z.string().optional(),
+          down: z.number().optional(),
+          flap_history: z.array(z.any()).optional(),
+          status: z.string().optional(),
         })
         .optional(),
     })
     .optional(),
   tls: z
     .object({
-      established: z.boolean(),
+      established: z.boolean().optional(),
+      version: z.string().optional(),
+      cipher: z.string().optional(),
+      certificate_not_valid_before: z.string().optional(),
+      certificate_not_valid_after: z.string().optional(),
+      version_protocol: z.string().optional(),
+      server: z
+        .object({
+          x509: z
+            .object({
+              not_after: z.string().optional(),
+              not_before: z.string().optional(),
+              public_key_exponent: z.number().optional(),
+              public_key_algorithm: z.string().optional(),
+              public_key_size: z.number().optional(),
+              signature_algorithm: z.string().optional(),
+              serial_number: z.string().optional(),
+              subject: z
+                .object({
+                  distinguished_name: z.string().optional(),
+                  common_name: z.string().optional(),
+                })
+                .optional(),
+              issuer: z
+                .object({
+                  distinguished_name: z.string().optional(),
+                  common_name: z.string().optional(),
+                })
+                .optional(),
+            })
+            .optional(),
+          hash: z
+            .object({
+              sha1: z.string().optional(),
+              sha256: z.string().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  tcp: z
+    .object({
+      rtt: z
+        .object({
+          connect: z
+            .object({
+              us: z.number().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  icmp: z
+    .object({
+      rtt: z
+        .object({
+          us: z.number().optional(),
+        })
+        .optional(),
+      requests: z.number().optional(),
+    })
+    .optional(),
+  synthetics: z
+    .object({
+      type: z.string().optional(),
+    })
+    .optional(),
+  summary: z
+    .object({
+      retry_group: z.string().optional(),
+      max_attempts: z.number().optional(),
+      up: z.number().optional(),
+      down: z.number().optional(),
+      attempt: z.number().optional(),
+      final_attempt: z.boolean().optional(),
+      status: z.string().optional(),
+    })
+    .optional(),
+  state: z
+    .object({
+      duration_ms: z.string().optional(),
+      checks: z.number().optional(),
+      ends: z.any().optional(),
+      started_at: z.string().optional(),
+      up: z.number().optional(),
+      id: z.string().optional(),
+      down: z.number().optional(),
+      flap_history: z.array(z.any()).optional(),
+      status: z.string().optional(),
+    })
+    .optional(),
+  event: z
+    .object({
+      agent_id_status: z.string().optional(),
+      ingested: z.string().optional(),
+      type: z.string().optional(),
+      dataset: z.string().optional(),
+    })
+    .optional(),
+  data_stream: z
+    .object({
+      namespace: z.string().optional(),
+      type: z.string().optional(),
+      dataset: z.string().optional(),
+    })
+    .optional(),
+  ecs: z
+    .object({
       version: z.string().optional(),
     })
     .optional(),
+  config_id: z.string().optional(),
   agent: z
     .object({
       name: z.string(),
       id: z.string(),
       type: z.string(),
       version: z.string(),
+      ephemeral_id: z.string().optional(),
     })
     .optional(),
   observer: z
@@ -186,6 +592,22 @@ export const MonitorInfoSchema = z.object({
       space_id: z.string(),
     })
     .optional(),
+  project: z
+    .object({
+      name: z.string().optional(),
+      id: z.string().optional(),
+    })
+    .optional(),
+  timespan: z
+    .object({
+      lt: z.string().optional(),
+      gte: z.string().optional(),
+    })
+    .optional(),
+  check_group: z.string().optional(),
+  fleet_managed: z.boolean().optional(),
+  origin: z.string().optional(),
+  ip: z.string().optional(),
 });
 
 export const ElasticsearchMonitorSchema = z.object({
@@ -270,15 +692,214 @@ export const ElasticsearchMetaSchema = z
   .optional();
 
 export const ElasticsearchSourceSchema = z.object({
-  monitor: ElasticsearchMonitorSchema,
-  url: ElasticsearchUrlSchema,
+  monitor: z.object({
+    id: z.string(),
+    name: z.string(),
+    type: z.string(),
+    status: z.string(),
+    duration: z.object({ us: z.number() }).optional(),
+    origin: z.string().optional(),
+    project: z
+      .object({
+        name: z.string().optional(),
+        id: z.string().optional(),
+      })
+      .optional(),
+    timespan: z
+      .object({
+        lt: z.string().optional(),
+        gte: z.string().optional(),
+      })
+      .optional(),
+    check_group: z.string().optional(),
+    fleet_managed: z.boolean().optional(),
+    ip: z.string().optional(),
+  }),
+  url: z.object({
+    full: z.string().optional(),
+    domain: z.string().optional(),
+    path: z.string().optional(),
+    scheme: z.string().optional(),
+    port: z.number().optional(),
+  }).optional(),
   "@timestamp": z.string(),
   tags: z.array(z.string()).optional(),
-  http: ElasticsearchHttpSchema.optional(),
-  tls: ElasticsearchTlsSchema.optional(),
-  agent: ElasticsearchAgentSchema.optional(),
-  observer: ElasticsearchObserverSchema.optional(),
-  meta: ElasticsearchMetaSchema.optional(),
+  http: z
+    .object({
+      response: z
+        .object({
+          status_code: z.number().optional(),
+          mime_type: z.string().optional(),
+          headers: z.record(z.string()).optional(),
+          body: z
+            .object({
+              bytes: z.number().optional(),
+              content: z.any().optional(),
+              hash: z.string().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+      rtt: z
+        .object({
+          total: z.object({ us: z.number().optional() }).optional(),
+        })
+        .optional(),
+      state: z
+        .object({
+          duration_ms: z.string().optional(),
+          checks: z.number().optional(),
+          ends: z.any().optional(),
+          started_at: z.string().optional(),
+          up: z.number().optional(),
+          id: z.string().optional(),
+          down: z.number().optional(),
+          flap_history: z.array(z.any()).optional(),
+          status: z.string().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  tls: z
+    .object({
+      established: z.boolean().optional(),
+      version: z.string().optional(),
+      cipher: z.string().optional(),
+      certificate_not_valid_before: z.string().optional(),
+      certificate_not_valid_after: z.string().optional(),
+      version_protocol: z.string().optional(),
+      server: z
+        .object({
+          x509: z
+            .object({
+              not_after: z.string().optional(),
+              not_before: z.string().optional(),
+              public_key_exponent: z.number().optional(),
+              public_key_algorithm: z.string().optional(),
+              public_key_size: z.number().optional(),
+              signature_algorithm: z.string().optional(),
+              serial_number: z.string().optional(),
+              subject: z
+                .object({
+                  distinguished_name: z.string().optional(),
+                  common_name: z.string().optional(),
+                })
+                .optional(),
+              issuer: z
+                .object({
+                  distinguished_name: z.string().optional(),
+                  common_name: z.string().optional(),
+                })
+                .optional(),
+            })
+            .optional(),
+          hash: z
+            .object({
+              sha1: z.string().optional(),
+              sha256: z.string().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  tcp: z
+    .object({
+      rtt: z
+        .object({
+          connect: z
+            .object({
+              us: z.number().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  icmp: z
+    .object({
+      rtt: z
+        .object({
+          us: z.number().optional(),
+        })
+        .optional(),
+      requests: z.number().optional(),
+    })
+    .optional(),
+  synthetics: z
+    .object({
+      type: z.string().optional(),
+    })
+    .optional(),
+  summary: z
+    .object({
+      retry_group: z.string().optional(),
+      max_attempts: z.number().optional(),
+      up: z.number().optional(),
+      down: z.number().optional(),
+      attempt: z.number().optional(),
+      final_attempt: z.boolean().optional(),
+      status: z.string().optional(),
+    })
+    .optional(),
+  state: z
+    .object({
+      duration_ms: z.string().optional(),
+      checks: z.number().optional(),
+      ends: z.any().optional(),
+      started_at: z.string().optional(),
+      up: z.number().optional(),
+      id: z.string().optional(),
+      down: z.number().optional(),
+      flap_history: z.array(z.any()).optional(),
+      status: z.string().optional(),
+    })
+    .optional(),
+  event: z
+    .object({
+      agent_id_status: z.string().optional(),
+      ingested: z.string().optional(),
+      type: z.string().optional(),
+      dataset: z.string().optional(),
+    })
+    .optional(),
+  data_stream: z
+    .object({
+      namespace: z.string().optional(),
+      type: z.string().optional(),
+      dataset: z.string().optional(),
+    })
+    .optional(),
+  ecs: z
+    .object({
+      version: z.string().optional(),
+    })
+    .optional(),
+  config_id: z.string().optional(),
+  agent: z
+    .object({
+      name: z.string(),
+      id: z.string(),
+      type: z.string(),
+      ephemeral_id: z.string().optional(),
+      version: z.string(),
+    })
+    .optional(),
+  observer: z
+    .object({
+      geo: z
+        .object({
+          name: z.string().optional(),
+        })
+        .optional(),
+      name: z.string().optional(),
+    })
+    .optional(),
+  meta: z
+    .object({
+      space_id: z.string().optional(),
+    })
+    .optional(),
 });
 
 export const ElasticsearchHitSchema = z.object({
@@ -362,7 +983,7 @@ export async function validateMonitorInfo(data: unknown[]): Promise<MonitorInfo[
   
   for (const info of data) {
     try {
-      const validatedInfo = MonitorInfoSchema.parse(info);
+      const validatedInfo = MonitorInfoSchema.parse(info) as MonitorInfo;
       validMonitors.push(validatedInfo);
     } catch (error) {
       console.warn("Skipping invalid monitor info:", error);
@@ -384,7 +1005,7 @@ export async function validateBusinessContext(data: unknown): Promise<BusinessCo
   } catch (error) {
     console.warn("Invalid business context:", error);
     await writeInvalidRecords('business_context', [{ message: error instanceof Error ? error.message : String(error) }], 'unknown');
-    throw error; // Re-throw to invalidate the record
+    throw error;
   }
 }
 
