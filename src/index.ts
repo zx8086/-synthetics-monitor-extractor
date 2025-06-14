@@ -169,7 +169,8 @@ async function fetchAllMonitorData() {
   }
 }
 
-// Extract business context directly from monitor tags
+
+
 export function extractBusinessContext(source: ElasticsearchHit["_source"]): BusinessContext {
   const tags = source.tags || [];
   const missingFields: string[] = [];
@@ -211,7 +212,7 @@ export function extractBusinessContext(source: ElasticsearchHit["_source"]): Bus
   };
 }
 
-// Transform monitor data into our standardized format
+// Transform monitor data with comprehensive field extraction
 async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<MonitorInfo[]> {
   const transformedData: MonitorInfo[] = [];
   const errorsByMonitor: Record<string, Set<string>> = {};
@@ -230,38 +231,83 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
         businessContext,
         tags: hit._source.tags || [],
         environment: hit._source.observer?.geo?.name || "unknown",
-        http: hit._source.http?.response
+        
+        http: hit._source.http
           ? {
-              statusCode: hit._source.http.response.status_code,
+              statusCode: hit._source.http.response?.status_code,
               responseTime: hit._source.http.rtt?.total?.us,
-              body: hit._source.http.response.body,
+              body: hit._source.http.response?.body
+                ? {
+                    bytes: hit._source.http.response.body.bytes,
+                    content: hit._source.http.response.body.content,
+                    hash: hit._source.http.response.body.hash,
+                  }
+                : undefined,
+              response: hit._source.http.response,
+              rtt: hit._source.http.rtt,
+              state: hit._source.http.state,
             }
           : undefined,
+          
         tls: hit._source.tls
           ? {
               established: hit._source.tls.established,
               version: hit._source.tls.version,
+              cipher: hit._source.tls.cipher,
+              certificate_not_valid_before: hit._source.tls.certificate_not_valid_before,
+              certificate_not_valid_after: hit._source.tls.certificate_not_valid_after,
+              version_protocol: hit._source.tls.version_protocol,
+              server: hit._source.tls.server,
             }
           : undefined,
+          
+        tcp: hit._source.tcp,
+          
+        icmp: hit._source.icmp,
+          
+        synthetics: hit._source.synthetics,
+        
+        summary: hit._source.summary,
+        
+        state: hit._source.state,
+        
+        event: hit._source.event,
+        
+        data_stream: hit._source.data_stream,
+        
+        ecs: hit._source.ecs,
+        
+        config_id: hit._source.config_id,
+        
         agent: hit._source.agent
           ? {
               name: hit._source.agent.name,
               id: hit._source.agent.id,
               type: hit._source.agent.type,
               version: hit._source.agent.version,
+              ephemeral_id: hit._source.agent.ephemeral_id,
             }
           : undefined,
+          
         observer: hit._source.observer
           ? {
-              name: hit._source.observer.name,
+              name: hit._source.observer.name || "",
               geo: hit._source.observer.geo?.name,
             }
           : undefined,
+          
         meta: hit._source.meta
           ? {
-              space_id: hit._source.meta.space_id,
+              space_id: hit._source.meta.space_id || "",
             }
           : undefined,
+          
+        project: hit._source.monitor.project,
+        timespan: hit._source.monitor.timespan,
+        check_group: hit._source.monitor.check_group,
+        fleet_managed: hit._source.monitor.fleet_managed,
+        origin: hit._source.monitor.origin,
+        ip: hit._source.monitor.ip,
       };
 
       transformedData.push(transformedMonitor);
