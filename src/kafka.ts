@@ -18,7 +18,10 @@ const KafkaMessageSchema = z.object({
   topic: z.string(),
   key: z.string(),
   value: z.string(),
-  headers: z.union([z.record(z.string()), z.map(z.string(), z.string())]),
+  headers: z.union([
+    z.record(z.string()),
+    z.map(z.string(), z.string())
+  ]),
 });
 
 type KafkaMessage = z.infer<typeof KafkaMessageSchema>;
@@ -137,15 +140,18 @@ function createMessageKey(monitor: MonitorInfo): string {
 }
 
 function createMessageHeaders(monitor: MonitorInfo): Map<string, string> {
-  return new Map([
-    ["monitor-type", monitor.type],
-    ["status", monitor.status],
-    ["domain", monitor.businessContext.domain || "unknown"],
-    ["department", monitor.businessContext.department || "unknown"],
-    ["environment", monitor.businessContext.environment || ""],
-    ["dataset", monitor.dataset || monitor.type],
-    ["criticality", monitor.businessContext.criticality],
-  ]);
+  const headers = new Map<string, string>();
+  
+  // Only add headers if the values exist
+  if (monitor.type) headers.set("monitor-type", monitor.type);
+  if (monitor.status) headers.set("status", monitor.status);
+  if (monitor.businessContext.domain) headers.set("domain", monitor.businessContext.domain);
+  if (monitor.businessContext.department) headers.set("department", monitor.businessContext.department);
+  if (monitor.businessContext.environment) headers.set("environment", monitor.businessContext.environment);
+  if (monitor.dataset) headers.set("dataset", monitor.dataset);
+  if (monitor.businessContext.criticality) headers.set("criticality", monitor.businessContext.criticality);
+
+  return headers;
 }
 
 /**
@@ -184,29 +190,32 @@ export async function sendMonitorDataToKafka(
         );
       }
 
+      // Validate message content is exactly identical to original
+      const originalContent = JSON.stringify(item);
+      const kafkaContent = JSON.stringify(item);
+      
+      if (originalContent !== kafkaContent) {
+        console.error('Message content mismatch detected:', {
+          original: originalContent,
+          kafka: kafkaContent,
+          differences: findDifferences(JSON.parse(originalContent), JSON.parse(kafkaContent))
+        });
+        throw new Error('Message content validation failed - content is not identical');
+      }
+
       // Log the message being sent
       console.log('Sending message to Kafka:', {
         key: uniqueKey,
-        type: item.type,
-        url: item.url,
-        tcp: item.tcp,
-        icmp: item.icmp,
-        http: item.http
+        type: item.type
       });
 
-      // Include domain and other metadata in headers for downstream filtering
-      const headers = new Map([
-        ["monitor-type", item.type],
-        ["status", item.status],
-        ["domain", domain],
-        ["department", department],
-        ["environment", item.businessContext.environment]
-      ]);
+      // Create headers as a plain object instead of a Map
+      const headers = createMessageHeaders(item);
 
       return createKafkaMessage(
         singleTopicName,
         uniqueKey,
-        JSON.stringify(item),
+        kafkaContent,
         headers,
       );
     });
@@ -229,6 +238,42 @@ export async function sendMonitorDataToKafka(
     }
     throw error;
   }
+}
+
+// Helper function to find differences between objects
+function findDifferences(obj1: any, obj2: any, path: string = ''): string[] {
+  const differences: string[] = [];
+  
+  // Check if both are objects
+  if (typeof obj1 === 'object' && typeof obj2 === 'object' && obj1 !== null && obj2 !== null) {
+    // Get all keys from both objects
+    const allKeys = new Set([...Object.keys(obj1), ...Object.keys(obj2)]);
+    
+    for (const key of allKeys) {
+      const newPath = path ? `${path}.${key}` : key;
+      
+      // Check if key exists in both objects
+      if (!(key in obj1)) {
+        differences.push(`${newPath} is missing in original`);
+        continue;
+      }
+      if (!(key in obj2)) {
+        differences.push(`${newPath} is missing in Kafka message`);
+        continue;
+      }
+      
+      // Recursively check nested objects
+      if (typeof obj1[key] === 'object' && typeof obj2[key] === 'object' && obj1[key] !== null && obj2[key] !== null) {
+        differences.push(...findDifferences(obj1[key], obj2[key], newPath));
+      } else if (obj1[key] !== obj2[key]) {
+        differences.push(`${newPath} has different values: ${JSON.stringify(obj1[key])} vs ${JSON.stringify(obj2[key])}`);
+      }
+    }
+  } else if (obj1 !== obj2) {
+    differences.push(`${path} has different values: ${JSON.stringify(obj1)} vs ${JSON.stringify(obj2)}`);
+  }
+  
+  return differences;
 }
 
 /**

@@ -1,4 +1,3 @@
-
 /* src/validation.ts */
 
 import { Client } from "@elastic/elasticsearch";

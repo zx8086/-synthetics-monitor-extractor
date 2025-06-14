@@ -1,3 +1,5 @@
+/* src/elasticsearch.ts */
+
 import { Client, estypes } from "@elastic/elasticsearch";
 import { Transport, type TransportRequestParams, HttpConnection } from "@elastic/transport";
 import { config } from "./config.js";
