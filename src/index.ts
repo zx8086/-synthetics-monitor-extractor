@@ -106,12 +106,14 @@ async function fetchAllMonitorData() {
         bool: {
           must: [
             {
-              wildcard: {
+              "wildcard": {
                 "monitor.name": monitorNameWildcard,
               },
             },
+            // Only get monitors that have a summary
+            { "exists": { "field": "summary" } },
             {
-              range: {
+              "range": {
                 "@timestamp": {
                   gte: timeRange,
                 },
@@ -143,7 +145,6 @@ async function fetchAllMonitorData() {
         "tcp",
         "icmp",
         "synthetics",
-        "tls",
         "agent",
         "observer",
         "meta",

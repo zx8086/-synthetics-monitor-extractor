@@ -4,9 +4,10 @@
 
 // Required bindings:
 // raw_events (source) -> _default.raw_events
-// metrics_1m (target) -> processed.metrics_1m
-// metrics_5m (target) -> processed.metrics_5m
+// metrics_15m (target) -> processed.metrics_15m
 // metrics_1h (target) -> processed.metrics_1h
+// metrics_6h (target) -> processed.metrics_6h
+// metrics_1d (target) -> processed.metrics_1d
 // services (target) -> analytics.services
 // departments (target) -> analytics.departments
 // domains (target) -> analytics.domains
@@ -38,7 +39,7 @@ function OnUpdate(doc, meta) {
     const serviceId = createSafeId(monitorName);
 
     const endpoint = doc.url?.full || "/";
-    const status = normalizeStatus((doc.status || "").toLowerCase());
+    const status = normalizeStatus((doc.monitor.status || "").toLowerCase());
     const monitorId = doc.id;
 
     // Process the data flow using references instead of embedding
@@ -274,7 +275,9 @@ function updateServiceDocument(
 
     // Extract metrics from document and ensure proper formatting
     serviceDoc.metrics.response_time_ms = safeNumber(
-      doc.duration || (doc.http && doc.http.responseTime) || 0
+      ((doc.monitor && doc.monitor.duration && doc.monitor.duration.us) || 
+      (doc.http && doc.http.rtt && doc.http.rtt.total && doc.http.rtt.total.us) || 
+      0) / 1000  // Convert microseconds to milliseconds
     );
     serviceDoc.metrics.availability = status === "up" ? 100.0 : 0.0;
     serviceDoc.metrics.error_rate = status === "down" ? 100.0 : 0.0;
@@ -405,7 +408,9 @@ function updateCurrentStateDocument(
     }
 
     statusDoc.current_metrics.response_time_ms = safeNumber(
-      doc.duration || (doc.http && doc.http.responseTime) || 0
+      ((doc.monitor && doc.monitor.duration && doc.monitor.duration.us) || 
+      (doc.http && doc.http.rtt && doc.http.rtt.total && doc.http.rtt.total.us) || 
+      0) / 1000  // Convert microseconds to milliseconds
     );
 
     // Store document
@@ -664,56 +669,72 @@ function storeTimeSeriesData(
 ) {
   try {
     // Calculate time buckets from document timestamp
-    const minuteBucket = Math.floor(timestamp / 60000) * 60000;
-    const fiveMinBucket = Math.floor(timestamp / 300000) * 300000;
+    const fifteenMinBucket = Math.floor(timestamp / 900000) * 900000;
     const hourBucket = Math.floor(timestamp / 3600000) * 3600000;
+    const sixHourBucket = Math.floor(timestamp / 21600000) * 21600000;
+    const dayBucket = Math.floor(timestamp / 86400000) * 86400000;
 
-    // Store in 1-minute buckets (high resolution, short retention)
+    // Store in 15-minute buckets (good resolution, 4-day retention)
     storeMetricInBucket(
       timestamp,
-      minuteBucket,
+      fifteenMinBucket,
       domainId,
       departmentId,
       serviceId,
       endpoint,
       status,
       doc,
-      metrics_1m,
-      60000,
-      60
+      metrics_15m,
+      900000,
+      24  // Keep 6 hours of 15-minute data
     );
 
-    // Only store in 5-min bucket if this is a new 5-min interval
-    if (timestamp % 300000 < 60000) {
+    // Store in hourly bucket for 12-hour views
+    storeMetricInBucket(
+      timestamp,
+      hourBucket,
+      domainId,
+      departmentId,
+      serviceId,
+      endpoint,
+      status,
+      doc,
+      metrics_1h,
+      3600000,
+      168  // Keep 7 days of hourly data
+    );
+
+    // Store in 6-hour bucket for 24-hour and 7-day views
+    if (timestamp % 21600000 < 60000) {  // Only store every 6 hours
       storeMetricInBucket(
         timestamp,
-        fiveMinBucket,
+        sixHourBucket,
         domainId,
         departmentId,
         serviceId,
         endpoint,
         status,
         doc,
-        metrics_5m,
-        300000,
-        12
+        metrics_6h,
+        21600000,
+        120  // Keep 30 days of 6-hour data
       );
     }
 
-    // Only store in hourly bucket if this is a new hour
-    if (timestamp % 3600000 < 60000) {
+    // Store in daily bucket for long-term trends
+    if (timestamp % 86400000 < 60000) {  // Only store once per day
       storeMetricInBucket(
         timestamp,
-        hourBucket,
+        dayBucket,
         domainId,
         departmentId,
         serviceId,
         endpoint,
         status,
         doc,
-        metrics_1h,
-        3600000,
-        24
+        metrics_1d,
+        86400000,
+        90  // Keep 90 days of daily data
       );
     }
   } catch (e) {
@@ -787,10 +808,12 @@ function storeMetricInBucket(
 
     // Extract metrics from the document
     const responseTime = safeNumber(
-      doc.duration || (doc.http && doc.http.responseTime) || 0
+      ((doc.monitor && doc.monitor.duration && doc.monitor.duration.us) || 
+      (doc.http && doc.http.rtt && doc.http.rtt.total && doc.http.rtt.total.us) || 
+      0) / 1000  // Convert microseconds to milliseconds
     );
     const isAvailable = status === "up" ? 1 : 0;
-    const httpStatus = safeNumber(doc.http && doc.http.response.statusCode || 0);
+    const httpStatus = safeNumber(doc.http && doc.http.response && doc.http.response.status_code || 0);
     const errorCount = status === "down" ? 1 : 0;
 
     // Calculate bucket offset
@@ -870,9 +893,10 @@ function storeMetricInBucket(
 
 // Calculate TTL based on collection - define retention for each granularity
 function calculateTTL(collection) {
-  if (collection === metrics_1h) return 7776000; // 90 days for hourly data
-  if (collection === metrics_5m) return 2592000; // 30 days for 5m data
-  return 864000; // 10 days for 1m data
+  if (collection === metrics_1d) return 7776000;     // 90 days for daily data
+  if (collection === metrics_6h) return 2592000;     // 30 days for 6h data
+  if (collection === metrics_1h) return 604800;      // 7 days for hourly data
+  return 345600;                                     // 4 days for 15m data
 }
 
 // Update metrics arrays safely with bounds checking
@@ -1045,8 +1069,8 @@ function createAlert(
       timestamp: new Date(timestamp).toISOString(),
       first_detected: Date.now(),
       message: `Monitor ${serviceName} is DOWN`,
-      error_details: (doc.http && doc.http.response.statusCode)
-        ? `HTTP Status: ${doc.http.response.statusCode}`
+      error_details: (doc.http && doc.http.response && doc.http.response.status_code)
+        ? `HTTP Status: ${doc.http.response.status_code}`
         : (doc.error && doc.error.message)
           ? doc.error.message
           : "No additional details",
