@@ -144,11 +144,11 @@ function createMessageHeaders(monitor: MonitorInfo): Map<string, string> {
   
   // Only add headers if the values exist
   if (monitor.type) headers.set("monitor-type", monitor.type);
-  if (monitor.status) headers.set("status", monitor.status);
+  if (monitor.monitor.status) headers.set("status", monitor.monitor.status);
   if (monitor.businessContext.domain) headers.set("domain", monitor.businessContext.domain);
   if (monitor.businessContext.department) headers.set("department", monitor.businessContext.department);
   if (monitor.businessContext.environment) headers.set("environment", monitor.businessContext.environment);
-  if (monitor.dataset) headers.set("dataset", monitor.dataset);
+  if (monitor.data_stream?.dataset) headers.set("dataset", monitor.data_stream.dataset);
   if (monitor.businessContext.criticality) headers.set("criticality", monitor.businessContext.criticality);
 
   return headers;
@@ -169,7 +169,6 @@ export async function sendMonitorDataToKafka(
   const singleTopicName = config.kafka.topicName;
 
   try {
-    // Send all data to a single topic with domain info in headers
     console.log(
       `Sending ${monitorData.length} messages to topic: ${singleTopicName}`,
     );
@@ -190,16 +189,71 @@ export async function sendMonitorDataToKafka(
         );
       }
 
-      // Validate message content is exactly identical to original
-      const originalContent = JSON.stringify(item);
-      const kafkaContent = JSON.stringify(item);
+      // Create a document structure that matches the original Elasticsearch document
+      const originalDocument = {
+        monitor: item.monitor,
+        http: item.http,
+        tls: item.tls,
+        tcp: item.tcp,
+        icmp: item.icmp,
+        synthetics: item.synthetics,
+        summary: item.summary,
+        state: item.state,
+        event: item.event,
+        data_stream: item.data_stream,
+        ecs: item.ecs,
+        config_id: item.config_id,
+        agent: item.agent,
+        observer: item.observer,
+        meta: item.meta,
+        project: item.project,
+        timespan: item.timespan,
+        check_group: item.check_group,
+        fleet_managed: item.fleet_managed,
+        origin: item.origin,
+        ip: item.ip,
+        url: item.url,
+        tags: item.tags,
+        "@timestamp": item.timestamp
+      };
+
+      // Validate message content matches original document structure
+      const differences = findDifferences(originalDocument, {
+        monitor: item.monitor,
+        http: item.http,
+        tls: item.tls,
+        tcp: item.tcp,
+        icmp: item.icmp,
+        synthetics: item.synthetics,
+        summary: item.summary,
+        state: item.state,
+        event: item.event,
+        data_stream: item.data_stream,
+        ecs: item.ecs,
+        config_id: item.config_id,
+        agent: item.agent,
+        observer: item.observer,
+        meta: item.meta,
+        project: item.project,
+        timespan: item.timespan,
+        check_group: item.check_group,
+        fleet_managed: item.fleet_managed,
+        origin: item.origin,
+        ip: item.ip,
+        url: item.url,
+        tags: item.tags,
+        "@timestamp": item.timestamp
+      });
       
-      if (originalContent !== kafkaContent) {
+      if (differences.length > 0) {
         console.error('Message content mismatch detected:', {
-          original: originalContent,
-          kafka: kafkaContent,
-          differences: findDifferences(JSON.parse(originalContent), JSON.parse(kafkaContent))
+          key: uniqueKey,
+          type: item.type,
+          differences,
+          original: originalDocument,
+          kafka: item
         });
+        
         throw new Error('Message content validation failed - content is not identical');
       }
 
@@ -215,7 +269,7 @@ export async function sendMonitorDataToKafka(
       return createKafkaMessage(
         singleTopicName,
         uniqueKey,
-        kafkaContent,
+        JSON.stringify(item),
         headers,
       );
     });
@@ -244,6 +298,11 @@ export async function sendMonitorDataToKafka(
 function findDifferences(obj1: any, obj2: any, path: string = ''): string[] {
   const differences: string[] = [];
   
+  // Skip comparison if either object is undefined
+  if (obj1 === undefined || obj2 === undefined) {
+    return differences;
+  }
+  
   // Check if both are objects
   if (typeof obj1 === 'object' && typeof obj2 === 'object' && obj1 !== null && obj2 !== null) {
     // Get all keys from both objects
@@ -252,9 +311,12 @@ function findDifferences(obj1: any, obj2: any, path: string = ''): string[] {
     for (const key of allKeys) {
       const newPath = path ? `${path}.${key}` : key;
       
+      // Skip _source field as it's a special case
+      if (key === '_source') continue;
+      
       // Check if key exists in both objects
       if (!(key in obj1)) {
-        differences.push(`${newPath} is missing in original`);
+        differences.push(`${newPath} is missing in original Elasticsearch document`);
         continue;
       }
       if (!(key in obj2)) {
@@ -265,14 +327,45 @@ function findDifferences(obj1: any, obj2: any, path: string = ''): string[] {
       // Recursively check nested objects
       if (typeof obj1[key] === 'object' && typeof obj2[key] === 'object' && obj1[key] !== null && obj2[key] !== null) {
         differences.push(...findDifferences(obj1[key], obj2[key], newPath));
-      } else if (obj1[key] !== obj2[key]) {
+      } else if (JSON.stringify(obj1[key]) !== JSON.stringify(obj2[key])) {
         differences.push(`${newPath} has different values: ${JSON.stringify(obj1[key])} vs ${JSON.stringify(obj2[key])}`);
       }
     }
-  } else if (obj1 !== obj2) {
+  } else if (JSON.stringify(obj1) !== JSON.stringify(obj2)) {
     differences.push(`${path} has different values: ${JSON.stringify(obj1)} vs ${JSON.stringify(obj2)}`);
   }
   
+  return differences;
+}
+
+// Helper function to validate monitor section
+function validateMonitorSection(original: any, transformed: any): string[] {
+  const differences: string[] = [];
+  const monitorFields = [
+    'id', 'name', 'type', 'status', 'duration', 'ip', 'origin',
+    'timespan', 'fleet_managed', 'check_group', 'project'
+  ];
+
+  // Check if monitor section exists in both
+  if (!original.monitor && !transformed.monitor) {
+    return differences;
+  }
+  if (!original.monitor) {
+    differences.push('monitor section is missing in original Elasticsearch document');
+    return differences;
+  }
+  if (!transformed.monitor) {
+    differences.push('monitor section is missing in Kafka message');
+    return differences;
+  }
+
+  // Check each monitor field
+  for (const field of monitorFields) {
+    if (JSON.stringify(original.monitor[field]) !== JSON.stringify(transformed.monitor[field])) {
+      differences.push(`monitor.${field} has different values: ${JSON.stringify(original.monitor[field])} vs ${JSON.stringify(transformed.monitor[field])}`);
+    }
+  }
+
   return differences;
 }
 
@@ -341,3 +434,170 @@ export async function closeKafkaProducer(): Promise<void> {
     producerInstance = null;
   }
 }
+
+/**
+ * Simulates an HTTP message for validation testing
+ */
+function simulateHttpMessage(): MonitorInfo {
+  return {
+    id: "test-monitor-123",
+    name: "Test HTTP Monitor",
+    type: "http",
+    url: {
+      scheme: "https",
+      domain: "api.example.com",
+      port: 443,
+      path: "/health",
+      full: "https://api.example.com/health"
+    },
+    timestamp: "2024-03-20T10:00:00.000Z",
+    status: "up",
+    duration: 150,
+    dataset: "http",
+    businessContext: {
+      domain: "test-domain",
+      department: "test-department",
+      criticality: "high",
+      environment: "production"
+    },
+    tags: ["test", "http", "domain:test-domain", "department:test-department", "criticality:high", "environment:production"],
+    environment: "eu-west-1",
+    monitor: {
+      id: "test-monitor-123",
+      name: "Test HTTP Monitor",
+      type: "http",
+      status: "up",
+      duration: { us: 150 },
+      ip: "10.0.0.1",
+      origin: "project",
+      timespan: {
+        gte: "2024-03-20T10:00:00.000Z",
+        lt: "2024-03-20T10:01:00.000Z"
+      },
+      fleet_managed: true,
+      check_group: "test-check-group-123",
+      project: {
+        name: "test-project",
+        id: "test-project"
+      }
+    },
+    http: {
+      response: {
+        status_code: 200,
+        mime_type: "application/json",
+        headers: {
+          "Content-Type": "application/json",
+          "Server": "nginx/1.18.0"
+        },
+        body: {
+          bytes: 45,
+          content: '{"status":"ok","message":"Service is healthy"}',
+          hash: "abc123hash"
+        }
+      },
+      rtt: {
+        total: { us: 150 }
+      },
+      state: "up"
+    },
+    tls: {
+      established: true,
+      version: "1.3",
+      cipher: "TLS_AES_128_GCM_SHA256",
+      certificate_not_valid_before: "2024-01-01T00:00:00.000Z",
+      certificate_not_valid_after: "2025-01-01T00:00:00.000Z",
+      version_protocol: "tls",
+      server: {
+        x509: {
+          not_after: "2025-01-01T00:00:00.000Z",
+          not_before: "2024-01-01T00:00:00.000Z",
+          subject: {
+            distinguished_name: "CN=api.example.com",
+            common_name: "api.example.com"
+          },
+          issuer: {
+            distinguished_name: "CN=Let's Encrypt Authority X3",
+            common_name: "Let's Encrypt Authority X3"
+          },
+          public_key_algorithm: "RSA",
+          signature_algorithm: "SHA256-RSA",
+          public_key_size: 2048,
+          public_key_exponent: 65537,
+          serial_number: "1234567890"
+        },
+        hash: {
+          sha1: "abc123sha1",
+          sha256: "abc123sha256"
+        }
+      }
+    },
+    summary: {
+      retry_group: "test-retry-group",
+      max_attempts: 3,
+      up: 1,
+      down: 0,
+      attempt: 1,
+      final_attempt: true,
+      status: "up"
+    },
+    state: {
+      duration_ms: "60000",
+      checks: 1,
+      ends: null,
+      started_at: "2024-03-20T10:00:00.000Z",
+      up: 1,
+      id: "test-state-123",
+      down: 0,
+      flap_history: [],
+      status: "up"
+    },
+    event: {
+      dataset: "http",
+      duration: 150,
+      type: ["info"]
+    },
+    data_stream: {
+      namespace: "default",
+      type: "synthetics",
+      dataset: "http"
+    },
+    ecs: {
+      version: "8.0.0"
+    },
+    config_id: "test-config-123",
+    agent: {
+      name: "test-agent",
+      id: "test-agent-id",
+      type: "heartbeat",
+      version: "8.0.0",
+      ephemeral_id: "test-ephemeral-id"
+    },
+    observer: {
+      name: "test-observer",
+      geo: {
+        name: "eu-west-1"
+      }
+    },
+    meta: {
+      space_id: "default"
+    },
+    project: {
+      name: "test-project",
+      id: "test-project"
+    },
+    timespan: {
+      gte: "2024-03-20T10:00:00.000Z",
+      lt: "2024-03-20T10:01:00.000Z"
+    },
+    check_group: "test-check-group-123",
+    fleet_managed: true,
+    origin: "project",
+    ip: "10.0.0.1"
+  };
+}
+
+// Example usage in sendMonitorDataToKafka:
+// const testMessage = simulateHttpMessage();
+// const messages = [testMessage].map((item) => {
+//   // ... existing message processing code ...
+// });

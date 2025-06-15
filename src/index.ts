@@ -260,6 +260,13 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
   for (const hit of monitorData) {
     try {
       const businessContext = extractBusinessContext(hit._source);
+      
+      const httpWithTls = hit._source.http
+        ? {
+            ...hit._source.http,
+            ...(hit._source.http.tls ? { tls: hit._source.http.tls } : {}),
+          }
+        : undefined;
       const transformedMonitor: MonitorInfo = {
         id: hit._source.monitor.id,
         name: hit._source.monitor.name,
@@ -272,72 +279,57 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
           full: undefined
         },
         timestamp: hit._source["@timestamp"],
-        status: hit._source.monitor.status,
-        duration: hit._source.monitor.duration?.us || 0,
-        dataset: hit._source.data_stream?.dataset || "synthetics",
         businessContext,
         tags: hit._source.tags || [],
-        environment: hit._source.observer?.geo?.name || "unknown",
-
-        http: hit._source.http
-          ? {
-              statusCode: hit._source.http.response?.status_code,
-              responseTime: hit._source.http.rtt?.total?.us,
-              response: hit._source.http.response,
-              rtt: hit._source.http.rtt,
-              state: hit._source.http.state,
-            }
-          : undefined,
-
-        tls: hit._source.tls,
-
-        tcp: hit._source.tcp,
-
-        icmp: hit._source.icmp,
-
-        synthetics: hit._source.synthetics,
-
-        summary: hit._source.summary,
-
-        state: hit._source.state,
-
-        event: hit._source.event,
-
-        data_stream: hit._source.data_stream,
-
-        ecs: hit._source.ecs,
-
-        config_id: hit._source.config_id,
-
-        agent: hit._source.agent
-          ? {
-              name: hit._source.agent.name || "",
-              id: hit._source.agent.id,
-              type: hit._source.agent.type || "",
-              version: hit._source.agent.version || "",
-              ephemeral_id: hit._source.agent.ephemeral_id,
-            }
-          : undefined,
-
-        observer: hit._source.observer
-          ? {
-              name: hit._source.observer.name || "",
-              geo: hit._source.observer.geo?.name,
-            }
-          : undefined,
-
-        meta: hit._source.meta
-          ? {
-              space_id: hit._source.meta.space_id || "",
-            }
-          : undefined,
-
-        project: hit._source.monitor.project,
-        timespan: hit._source.monitor.timespan,
-        check_group: hit._source.monitor.check_group,
-        fleet_managed: hit._source.monitor.fleet_managed,
-        origin: hit._source.monitor.origin,
-        ip: hit._source.monitor.ip,
+        monitor: {
+          id: hit._source.monitor.id,
+          name: hit._source.monitor.name,
+          type: hit._source.monitor.type,
+          status: hit._source.monitor.status,
+          duration: hit._source.monitor.duration,
+          ip: hit._source.monitor.ip,
+          origin: hit._source.monitor.origin,
+          timespan: hit._source.monitor.timespan,
+          fleet_managed: hit._source.monitor.fleet_managed,
+          check_group: hit._source.monitor.check_group,
+          project: hit._source.monitor.project
+        },
+        ...(httpWithTls ? { http: httpWithTls } : {}),
+        ...(hit._source.tcp ? { tcp: hit._source.tcp } : {}),
+        ...(hit._source.icmp ? { icmp: hit._source.icmp } : {}),
+        ...(hit._source.synthetics ? { synthetics: { type: hit._source.synthetics.type } } : {}),
+        ...(hit._source.summary ? { summary: {
+          retry_group: hit._source.summary.retry_group || "",
+          max_attempts: hit._source.summary.max_attempts || 0,
+          up: hit._source.summary.up || 0,
+          down: hit._source.summary.down || 0,
+          attempt: hit._source.summary.attempt || 0,
+          final_attempt: hit._source.summary.final_attempt || false,
+          status: hit._source.summary.status || ""
+        } } : {}),
+        ...(hit._source.state ? { state: {
+          duration_ms: hit._source.state.duration_ms || "",
+          checks: hit._source.state.checks || 0,
+          ends: hit._source.state.ends || null,
+          started_at: hit._source.state.started_at || "",
+          up: hit._source.state.up || 0,
+          id: hit._source.state.id || "",
+          down: hit._source.state.down || 0,
+          flap_history: hit._source.state.flap_history || [],
+          status: hit._source.state.status || ""
+        } } : {}),
+        ...(hit._source.event ? { event: {
+          agent_id_status: hit._source.event.agent_id_status,
+          ingested: hit._source.event.ingested,
+          type: hit._source.event.type,
+          dataset: hit._source.event.dataset
+        } } : {}),
+        ...(hit._source.data_stream ? { data_stream: hit._source.data_stream } : {}),
+        ...(hit._source.ecs ? { ecs: hit._source.ecs } : {}),
+        ...(hit._source.config_id ? { config_id: hit._source.config_id } : {}),
+        ...(hit._source.agent ? { agent: hit._source.agent } : {}),
+        ...(hit._source.observer ? { observer: hit._source.observer } : {}),
+        ...(hit._source.meta ? { meta: hit._source.meta } : {})
       };
 
       transformedData.push(transformedMonitor);

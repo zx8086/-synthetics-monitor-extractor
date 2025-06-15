@@ -13,120 +13,144 @@ export interface BusinessContext {
 }
 
 export interface MonitorInfo {
+  _source?: SourceDocument;
   id: string;
   name: string;
   type: string;
   url: {
     scheme?: string;
     domain?: string;
-    port?: string | number;
+    port?: number;
     path?: string;
     full?: string;
   };
   timestamp: string;
-  status: string;
-  duration: number;
-  dataset: string;
   businessContext: BusinessContext;
   tags: string[];
-  environment: string;
+  monitor: {
+    id: string;
+    name: string;
+    type: string;
+    status: string;
+    duration?: {
+      us: number;
+    };
+    ip?: string;
+    origin?: string;
+    timespan?: {
+      lt: string;
+      gte: string;
+    };
+    fleet_managed?: boolean;
+    check_group?: string;
+    project?: {
+      name: string;
+      id: string;
+    };
+  };
   http?: {
-    statusCode?: number;
-    responseTime?: number;
     response?: {
-      status_code?: number;
+      status_code: number;
       mime_type?: string;
       headers?: Record<string, string>;
       body?: {
-        bytes?: number;
-        content?: any;
-        hash?: string;
+        bytes: number;
+        content: string;
+        hash: string;
       };
     };
     rtt?: {
       total?: {
-        us?: number;
+        us: number;
       };
     };
-    state?: {
-      duration_ms?: string;
-      checks?: number;
-      ends?: any;
-      started_at?: string;
-      up?: number;
-      id?: string;
-      down?: number;
-      flap_history?: any[];
-      status?: string;
-    };
+    state?: string;
   };
   tls?: {
-    established?: boolean;
-    version?: string;
-    cipher?: string;
-    certificate_not_valid_before?: string;
-    certificate_not_valid_after?: string;
-    version_protocol?: string;
+    established: boolean;
+    version: string;
+    cipher: string;
+    certificate_not_valid_before: string;
+    certificate_not_valid_after: string;
+    version_protocol: string;
     server?: {
       x509?: {
-        not_after?: string;
-        not_before?: string;
-        public_key_exponent?: number;
-        public_key_algorithm?: string;
-        public_key_size?: number;
-        signature_algorithm?: string;
-        serial_number?: string;
-        subject?: {
-          distinguished_name?: string;
-          common_name?: string;
+        not_after: string;
+        not_before: string;
+        public_key_exponent: number;
+        public_key_algorithm: string;
+        public_key_size: number;
+        signature_algorithm: string;
+        serial_number: string;
+        subject: {
+          distinguished_name: string;
+          common_name: string;
         };
-        issuer?: {
-          distinguished_name?: string;
-          common_name?: string;
+        issuer: {
+          distinguished_name: string;
+          common_name: string;
         };
       };
       hash?: {
-        sha1?: string;
-        sha256?: string;
+        sha1: string;
+        sha256: string;
       };
     };
   };
   tcp?: {
     rtt?: {
       connect?: {
-        us?: number;
+        us: number;
       };
     };
   };
   icmp?: {
     rtt?: {
-      us?: number;
+      us: number;
     };
     requests?: number;
+  };
+  browser?: {
+    name?: string;
+    version?: string;
+    os?: {
+      name?: string;
+      version?: string;
+      full?: string;
+    };
+    device?: {
+      name?: string;
+      type?: string;
+      mobile?: boolean;
+    };
+    viewport?: {
+      width?: number;
+      height?: number;
+    };
+    user_agent?: string;
   };
   synthetics?: {
     type?: string;
   };
   summary?: {
-    retry_group?: string;
-    max_attempts?: number;
-    up?: number;
-    down?: number;
-    attempt?: number;
-    final_attempt?: boolean;
-    status?: string;
+    retry_group: string;
+    max_attempts: number;
+    up: number;
+    down: number;
+    attempt: number;
+    final_attempt: boolean;
+    status: string;
   };
-  
   state?: {
-    duration_ms?: string;
-    checks?: number;
-    ends?: any;
-    started_at?: string;
-    up?: number;
-    id?: string;
-    down?: number;
-    flap_history?: any[];
-    status?: string;
+    duration_ms: string;
+    checks: number;
+    ends: null;
+    started_at: string;
+    up: number;
+    id: string;
+    down: number;
+    flap_history: any[];
+    status: string;
   };
   event?: {
     agent_id_status?: string;
@@ -135,12 +159,12 @@ export interface MonitorInfo {
     dataset?: string;
   };
   data_stream?: {
-    namespace?: string;
-    type?: string;
-    dataset?: string;
+    namespace: string;
+    type: string;
+    dataset: string;
   };
   ecs?: {
-    version?: string;
+    version: string;
   };
   config_id?: string;
   agent?: {
@@ -148,26 +172,17 @@ export interface MonitorInfo {
     id: string;
     type: string;
     version: string;
-    ephemeral_id?: string;
+    ephemeral_id: string;
   };
   observer?: {
     name: string;
-    geo?: string;
+    geo?: {
+      name: string;
+    };
   };
   meta?: {
     space_id: string;
   };
-  project?: {
-    name?: string;
-    id?: string;
-  };
-  timespan?: {
-    lt?: string;
-    gte?: string;
-  };
-  check_group?: string;
-  fleet_managed?: boolean;
-  origin?: string;
   ip?: string;
 }
 
@@ -226,6 +241,35 @@ export const MonitorInfoSchema = z.object({
   businessContext: BusinessContextSchema,
   tags: z.array(z.string()),
   environment: z.string(),
+  monitor: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+      type: z.string(),
+      status: z.string(),
+      duration: z
+        .object({
+          us: z.number().optional(),
+        })
+        .optional(),
+      ip: z.string().optional(),
+      origin: z.string().optional(),
+      timespan: z
+        .object({
+          lt: z.string().optional(),
+          gte: z.string().optional(),
+        })
+        .optional(),
+      fleet_managed: z.boolean().optional(),
+      check_group: z.string().optional(),
+      project: z
+        .object({
+          id: z.string().optional(),
+          name: z.string().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   http: z
     .object({
       statusCode: z.number().optional(),
@@ -693,8 +737,8 @@ export const ElasticsearchSourceSchema = z.object({
       name: z.string(),
       id: z.string(),
       type: z.string(),
-      ephemeral_id: z.string().optional(),
       version: z.string(),
+      ephemeral_id: z.string().optional(),
     })
     .optional(),
   observer: z

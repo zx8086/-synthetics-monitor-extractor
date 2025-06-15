@@ -27,17 +27,17 @@ function OnUpdate(doc, meta) {
       : Date.now();
 
     // Extract domain and department information
-    const domainName = doc.businessContext?.domain || "unknown";
+    const domainName = doc.businessContext?.domain;
     const domainId = createSafeId(domainName);
 
-    const departmentName = doc.businessContext?.department || "unknown";
+    const departmentName = doc.businessContext?.department;
     const departmentId = createSafeId(departmentName);
 
     // Use monitor name as the primary name, with serviceId derived from it
-    const monitorName = doc.name || "Unnamed Monitor";
+    const monitorName = doc.name;
     const serviceId = createSafeId(monitorName);
 
-    const endpoint = doc.url || "/";
+    const endpoint = doc.url?.full || "/";
     const status = normalizeStatus((doc.status || "").toLowerCase());
     const monitorId = doc.id;
 
@@ -181,8 +181,8 @@ function updateServiceDocument(
     
     // Extract the HTTP body content from the nested structure
     let bodyContent = null;
-    if (doc.http && doc.http.body && doc.http.body.content) {
-      bodyContent = doc.http.body.content;
+    if (doc.http && doc.http.response && doc.http.response.body && doc.http.response.body.content) {
+      bodyContent = doc.http.response.body.content;
       
       // Try to parse the JSON content if it's a string
       try {
@@ -319,8 +319,8 @@ function updateCurrentStateDocument(
     
     // Extract the HTTP body content from the nested structure
     let bodyContent = null;
-    if (doc.http && doc.http.body && doc.http.body.content) {
-      bodyContent = doc.http.body.content;
+    if (doc.http && doc.http.response && doc.http.response.body && doc.http.response.body.content) {
+      bodyContent = doc.http.response.body.content;
       
       // Try to parse the JSON content if it's a string
       try {
@@ -790,7 +790,7 @@ function storeMetricInBucket(
       doc.duration || (doc.http && doc.http.responseTime) || 0
     );
     const isAvailable = status === "up" ? 1 : 0;
-    const httpStatus = safeNumber(doc.http && doc.http.statusCode || 0);
+    const httpStatus = safeNumber(doc.http && doc.http.response.statusCode || 0);
     const errorCount = status === "down" ? 1 : 0;
 
     // Calculate bucket offset
@@ -1039,14 +1039,14 @@ function createAlert(
       department_id: departmentId,
       department_name: departmentName,
       environment:
-        doc.environment || (doc.businessContext && doc.businessContext.environment) || "production",
+        doc.businessContext?.environment || "production",
       criticality: (doc.businessContext && doc.businessContext.criticality) || "medium",
       status: "down",
       timestamp: new Date(timestamp).toISOString(),
       first_detected: Date.now(),
       message: `Monitor ${serviceName} is DOWN`,
-      error_details: (doc.http && doc.http.statusCode)
-        ? `HTTP Status: ${doc.http.statusCode}`
+      error_details: (doc.http && doc.http.response.statusCode)
+        ? `HTTP Status: ${doc.http.response.statusCode}`
         : (doc.error && doc.error.message)
           ? doc.error.message
           : "No additional details",
@@ -1346,7 +1346,23 @@ function safeNumber(value, defaultValue = 0) {
 // Delete processed document
 function deleteDocument(docId) {
   try {
-    raw_events[docId] = null;
+    // Log the deletion before actually deleting
+    log("Document processed and deleted:", docId);
+    
+    // Actually delete the document from raw_events
+    delete raw_events[docId];
+    
+    // Log successful deletion to error_logs for tracking
+    const errorId = `delete::${Date.now()}::${Math.floor(Math.random() * 1000000)}`;
+    error_logs[errorId] = {
+      message: "Document successfully processed and deleted",
+      context: docId,
+      timestamp: new Date().toISOString(),
+      metadata: {
+        created_at: Date.now(),
+        ttl: 2592000 // 30 days
+      }
+    };
   } catch (e) {
     logError("Error deleting document", docId, e);
   }
@@ -1379,228 +1395,5 @@ function OnDelete(meta) {
     log("Document deleted:", meta.id);
   } catch (e) {
     // Ignore errors in deletion handler
-  }
-}
-
-// Function to repair existing documents with formatting issues
-function repairDocuments() {
-  try {
-    log("Starting document repair process...");
-    
-    // Repair domain documents
-    repairDomainDocuments();
-    
-    // Repair department documents
-    repairDepartmentDocuments();
-    
-    // Repair service documents
-    repairServiceDocuments();
-    
-    log("Document repair process completed.");
-  } catch (e) {
-    logError("Error in repairDocuments", e);
-  }
-}
-
-// Repair domain documents
-function repairDomainDocuments() {
-  try {
-    // Use N1QL to get all domain IDs
-    const statement = "SELECT RAW META().id FROM monitoring.analytics.domains WHERE doc_type = 'domain'";
-    const queryResult = query(statement);
-    
-    if (!queryResult || !Array.isArray(queryResult)) {
-      log("No domain documents found or query failed");
-      return;
-    }
-    
-    log(`Found ${queryResult.length} domain documents to repair`);
-    
-    queryResult.forEach(id => {
-      try {
-        const domainDoc = domains[id];
-        if (!domainDoc) return;
-        
-        // Fix availability percentage
-        if (domainDoc.metrics && domainDoc.metrics.availability_percent) {
-          domainDoc.metrics.availability_percent = 
-            formatPercentage(domainDoc.metrics.availability_percent);
-        }
-        
-        // Fix trend data
-        if (Array.isArray(domainDoc.trend)) {
-          domainDoc.trend = domainDoc.trend.map(point => {
-            return {
-              timestamp: point.timestamp,
-              value: formatPercentage(point.value)
-            };
-          });
-        }
-        
-        // Convert metrics fields to use up/down terminology
-        if (domainDoc.metrics) {
-          const metrics = domainDoc.metrics;
-          
-          // Create up/down fields if they don't exist
-          if (metrics.healthy_departments !== undefined && metrics.up_departments === undefined) {
-            metrics.up_departments = metrics.healthy_departments;
-          }
-          
-          if (metrics.critical_departments !== undefined && metrics.down_departments === undefined) {
-            metrics.down_departments = metrics.critical_departments;
-          }
-          
-          // Remove old fields
-          delete metrics.healthy_departments;
-          delete metrics.warning_departments;
-          delete metrics.critical_departments;
-        }
-        
-        // Save repaired document
-        domains[id] = domainDoc;
-        log(`Repaired domain document: ${id}`);
-      } catch (e) {
-        logError("Error repairing domain document", id, e);
-      }
-    });
-  } catch (e) {
-    logError("Error in repairDomainDocuments", e);
-  }
-}
-
-// Repair department documents
-function repairDepartmentDocuments() {
-  try {
-    // Use N1QL to get all department IDs
-    const statement = "SELECT RAW META().id FROM monitoring.analytics.departments WHERE doc_type = 'department'";
-    const queryResult = query(statement);
-    
-    if (!queryResult || !Array.isArray(queryResult)) {
-      log("No department documents found or query failed");
-      return;
-    }
-    
-    log(`Found ${queryResult.length} department documents to repair`);
-    
-    queryResult.forEach(id => {
-      try {
-        const deptDoc = departments[id];
-        if (!deptDoc) return;
-        
-        // Reset counters
-        let up_count = 0;
-        let down_count = 0;
-        
-        // Count services by status if service_refs exists
-        if (deptDoc.service_refs) {
-          Object.keys(deptDoc.service_refs).forEach(svcId => {
-            const svcStatus = deptDoc.service_refs[svcId].status;
-            if (svcStatus === "up") {
-              up_count++;
-            } else if (svcStatus === "down") {
-              down_count++;
-            }
-          });
-          
-          // Ensure metrics object exists
-          if (!deptDoc.metrics) {
-            deptDoc.metrics = {
-              up_count: 0,
-              down_count: 0,
-              total: 0
-            };
-          }
-          
-          // Update metrics
-          deptDoc.metrics.up_count = up_count;
-          deptDoc.metrics.down_count = down_count;
-          deptDoc.metrics.total = Object.keys(deptDoc.service_refs).length;
-          
-          // Update status
-          deptDoc.status = down_count > 0 ? "down" : "up";
-          
-          // Convert metrics fields to use up/down terminology
-          if (deptDoc.metrics.healthy !== undefined && deptDoc.metrics.up_count === undefined) {
-            deptDoc.metrics.up_count = deptDoc.metrics.healthy;
-          }
-          
-          if (deptDoc.metrics.critical !== undefined && deptDoc.metrics.down_count === undefined) {
-            deptDoc.metrics.down_count = deptDoc.metrics.critical;
-          }
-          
-          // Remove old fields
-          delete deptDoc.metrics.healthy;
-          delete deptDoc.metrics.warning;
-          delete deptDoc.metrics.critical;
-        }
-        
-        // Fix trend data
-        if (Array.isArray(deptDoc.trend)) {
-          deptDoc.trend = deptDoc.trend.map(point => {
-            return {
-              timestamp: point.timestamp,
-              value: formatPercentage(point.value)
-            };
-          });
-        }
-        
-        // Save repaired document
-        departments[id] = deptDoc;
-        log(`Repaired department document: ${id}`);
-      } catch (e) {
-        logError("Error repairing department document", id, e);
-      }
-    });
-  } catch (e) {
-    logError("Error in repairDepartmentDocuments", e);
-  }
-}
-
-// Repair service documents
-function repairServiceDocuments() {
-  try {
-    // Use N1QL to get all service IDs
-    const statement = "SELECT RAW META().id FROM monitoring.analytics.services WHERE doc_type = 'service'";
-    const queryResult = query(statement);
-    
-    if (!queryResult || !Array.isArray(queryResult)) {
-      log("No service documents found or query failed");
-      return;
-    }
-    
-    log(`Found ${queryResult.length} service documents to repair`);
-    
-    queryResult.forEach(id => {
-      try {
-        const serviceDoc = services[id];
-        if (!serviceDoc) return;
-        
-        // Fix metrics
-        if (serviceDoc.metrics) {
-          if (serviceDoc.metrics.availability) {
-            serviceDoc.metrics.availability = formatPercentage(serviceDoc.metrics.availability);
-          }
-          
-          if (serviceDoc.metrics.error_rate) {
-            serviceDoc.metrics.error_rate = formatPercentage(serviceDoc.metrics.error_rate);
-          }
-        }
-        
-        // Update status to just up/down
-        if (serviceDoc.status === "degraded" || serviceDoc.status === "warning") {
-          serviceDoc.status = "down";
-        } else if (serviceDoc.status === "healthy") {
-          serviceDoc.status = "up";
-        }
-        
-        // Save repaired document
-        services[id] = serviceDoc;
-        log(`Repaired service document: ${id}`);
-      } catch (e) {
-        logError("Error repairing service document", id, e);
-      }
-    });
-  } catch (e) {
-    logError("Error in repairServiceDocuments", e);
   }
 }
