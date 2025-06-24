@@ -23,26 +23,14 @@ export function initializeMetrics() {
   });
 }
 
+// Note: This is kept for backward compatibility but the actual server is started in api.ts
 export async function startMetricsServer() {
   if (!config.metrics.enabled) {
     console.log('Metrics disabled, skipping metrics server startup');
     return;
   }
 
-  const server = Bun.serve({
-    port: config.metrics.port,
-    async fetch(req) {
-      const url = new URL(req.url);
-      if (url.pathname === config.metrics.endpoint) {
-        const metrics = await registry.metrics();
-        return new Response(metrics, {
-          headers: { 'Content-Type': registry.contentType },
-        });
-      }
-      return new Response('Not Found', { status: 404 });
-    },
-  });
-
-  console.log(`Metrics server started on port ${config.metrics.port}${config.metrics.endpoint}`);
-  return server;
+  console.log(`Metrics will be available at ${config.metrics.endpoint} on the API server`);
+  // The actual server is started in api.ts to avoid port conflicts
+  return null;
 }

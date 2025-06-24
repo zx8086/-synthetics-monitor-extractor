@@ -4,6 +4,7 @@ import { z } from "zod";
 import { writeFile } from "fs/promises";
 import { join } from "path";
 import fs from "fs";
+import { storeInvalidRecord } from "./database.js";
 
 export interface BusinessContext {
   domain: string;
@@ -762,50 +763,17 @@ export const ElasticsearchHitSchema = z.object({
   _source: ElasticsearchSourceSchema,
 });
 
-// Buffer to store invalid records during an extraction cycle
-let invalidRecordsBuffer: Array<{
-  timestamp: string;
-  type: string;
-  monitorName?: string;
-  errors: Array<{ message: string }>;
-}> = [];
-
-// Helper function to write invalid records to file
+// Helper function to write invalid records to database
 export function writeInvalidRecords(type: string, errors: Array<{ message: string }>, monitorName?: string): void {
-  const timestamp = new Date().toISOString();
-  const invalidData = {
-    timestamp,
-    type,
-    monitorName,
-    errors
-  };
-
-  try {
-    // Add to buffer
-    invalidRecordsBuffer.push(invalidData);
-    
-    // Ensure src directory exists
-    fs.mkdirSync('src', { recursive: true });
-    
-    // Write current buffer to file, overwriting the previous content
-    const filePath = 'src/invalid.json';
-    fs.writeFileSync(filePath, JSON.stringify(invalidRecordsBuffer, null, 2), 'utf8');
-  } catch (error) {
-    console.error('Error writing invalid records:', error);
-    if (error instanceof Error) {
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
-      });
-    }
+  for (const error of errors) {
+    storeInvalidRecord(type, error.message, monitorName);
   }
 }
 
-// Function to clear the invalid records buffer at the start of a new extraction
+// Function is maintained for backward compatibility but no longer needs to clear a buffer
 export function clearInvalidRecordsBuffer(): void {
-  console.log('Clearing invalid records buffer');
-  invalidRecordsBuffer = [];
+  console.log('Database will handle invalid records tracking');
+  // No need to clear anything with the database approach
 }
 
 // Validation functions

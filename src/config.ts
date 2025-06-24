@@ -85,12 +85,19 @@ const MetricsConfigSchema = z.object({
   endpoint: z.string().default("/metrics"),
 });
 
+const ApiConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  invalidRecordsEndpoint: z.string().default("/api/invalid-records"),
+  uiEndpoint: z.string().default("/ui"),
+});
+
 const ConfigSchema = z.object({
   elasticsearch: ElasticsearchConfigSchema,
   kafka: KafkaConfigSchema,
   extraction: ExtractionConfigSchema,
   logging: LoggingConfigSchema,
   metrics: MetricsConfigSchema,
+  api: ApiConfigSchema,
   nodeEnv: z
     .enum(["development", "production", "staging"])
     .default("development"),
@@ -140,6 +147,11 @@ const defaultConfig: Config = {
     prefix: "synthetics_extractor_",
     endpoint: "/metrics",
   },
+  api: {
+    enabled: true,
+    invalidRecordsEndpoint: "/api/invalid-records",
+    uiEndpoint: "/ui",
+  },
   nodeEnv: "development",
 };
 
@@ -188,6 +200,11 @@ const envVarMapping = {
     port: "METRICS_PORT",
     prefix: "METRICS_PREFIX",
     endpoint: "METRICS_ENDPOINT",
+  },
+  api: {
+    enabled: "API_ENABLED",
+    invalidRecordsEndpoint: "API_INVALID_RECORDS_ENDPOINT",
+    uiEndpoint: "API_UI_ENDPOINT",
   },
   nodeEnv: "NODE_ENV",
 } as const;
@@ -313,6 +330,13 @@ function loadConfigFromEnv(): Partial<Config> {
     prefix: getEnvConfig(envVarMapping.metrics.prefix, "string"),
     endpoint: getEnvConfig(envVarMapping.metrics.endpoint, "string"),
   };
+  
+  // Load API config
+  envConfig.api = {
+    enabled: getEnvConfig(envVarMapping.api.enabled, "boolean"),
+    invalidRecordsEndpoint: getEnvConfig(envVarMapping.api.invalidRecordsEndpoint, "string"),
+    uiEndpoint: getEnvConfig(envVarMapping.api.uiEndpoint, "string"),
+  };
 
   // Load NodeEnv
   envConfig.nodeEnv = getEnvConfig(envVarMapping.nodeEnv, "string");
@@ -327,6 +351,7 @@ function loadConfigFromEnv(): Partial<Config> {
     extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
     logging: { ...defaultConfig.logging, ...envConfig.logging },
     metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
+    api: { ...defaultConfig.api, ...envConfig.api },
     nodeEnv: envConfig.nodeEnv || defaultConfig.nodeEnv,
   });
 
@@ -452,6 +477,7 @@ try {
     extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
     logging: { ...defaultConfig.logging, ...envConfig.logging },
     metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
+    api: { ...defaultConfig.api, ...envConfig.api },  // Include api configuration
     nodeEnv: envConfig.nodeEnv || defaultConfig.nodeEnv,
   };
 
@@ -492,6 +518,11 @@ try {
             port: config.metrics.port,
             prefix: config.metrics.prefix,
           },
+          api: {
+            enabled: config.api.enabled,
+            invalidRecordsEndpoint: config.api.invalidRecordsEndpoint,
+            uiEndpoint: config.api.uiEndpoint,
+          },
           nodeEnv: config.nodeEnv,
         },
         null,
@@ -528,6 +559,7 @@ export function getConfigDocumentation(): Record<string, any> {
       ),
       logging: LoggingConfigSchema.describe("Logging configuration"),
       metrics: MetricsConfigSchema.describe("Metrics configuration"),
+      api: ApiConfigSchema.describe("API and UI configuration"),
     },
   };
 }

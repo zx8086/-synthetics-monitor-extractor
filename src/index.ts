@@ -20,7 +20,9 @@ import {
   startMetricsServer,
   registry,
   kafkaMessageSizeHistogram,
-} from "./metrics";
+} from "./metrics.js";
+import { initializeDatabase, closeDatabase } from "./database.js";
+import { startApiServer } from "./api.js";
 import {
   getElasticsearchClient,
   executeSearch,
@@ -360,6 +362,13 @@ async function startExtractionProcess() {
   console.log("🚀 Starting synthetics monitor extractor...");
 
   try {
+    // Initialize database
+    initializeDatabase();
+    
+    // Start API server (combines metrics and invalid records API)
+    console.log(`Starting API server on port ${config.metrics.port}...`);
+    const apiServer = startApiServer(config.metrics.port);
+    
     // Initial connection validation
     const connectionValidation = await validateConnections();
 
@@ -430,6 +439,7 @@ process.on("SIGTERM", async () => {
   try {
     await closeElasticsearchClient();
     await closeKafkaProducer();
+    closeDatabase(); // Close the database connection
     console.log("All connections closed successfully");
   } catch (error) {
     console.error("Error during shutdown:", error);
@@ -441,7 +451,8 @@ process.on("SIGTERM", async () => {
 if (import.meta.main) {
   (async () => {
     try {
-      const metricsServer = await startMetricsServer();
+      // Initialize metrics but don't start a separate server
+      initializeMetrics();
       await startExtractionProcess();
     } catch (error) {
       console.error("Failed to start extraction process:", error);

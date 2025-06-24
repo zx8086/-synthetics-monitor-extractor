@@ -39,3 +39,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Invalid JSON files
 invalid.json
+data/

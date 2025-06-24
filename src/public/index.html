@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synthetics Monitor Errors</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1rem;
+      color: #333;
+    }
+    h1, h2 {
+      color: #333;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 10px;
+      text-align: left;
+    }
+    th {
+      background-color: #f6f8fa;
+      font-weight: 600;
+    }
+    tr:nth-child(even) {
+      background-color: #f9f9f9;
+    }
+    tr:hover {
+      background-color: #f0f4f8;
+    }
+    .type-badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: bold;
+    }
+    .filter-container {
+      margin-bottom: 1rem;
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+    .filter-container label {
+      font-weight: 600;
+      min-width: 80px;
+    }
+    .filter-container select, .filter-container input {
+      padding: 0.5rem;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+      flex-grow: 1;
+    }
+    .badge-monitor_transformation {
+      background-color: #ffcca5;
+      color: #994d00;
+    }
+    .badge-elasticsearch_hits {
+      background-color: #c5e1a5;
+      color: #33691e;
+    }
+    .badge-business_context {
+      background-color: #b3e5fc;
+      color: #01579b;
+    }
+    .badge-default {
+      background-color: #e0e0e0;
+      color: #424242;
+    }
+    .counter {
+      background-color: #e0e0e0;
+      border-radius: 50%;
+      padding: 2px 6px;
+      font-size: 0.8rem;
+    }
+    .refresh-button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 14px;
+      margin: 4px 2px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .header-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .last-refresh {
+      font-size: 0.8rem;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>Synthetics Monitor Errors</h1>
+  
+  <div class="header-actions">
+    <span class="last-refresh">Last refreshed: <span id="lastRefreshTime">Never</span></span>
+    <button class="refresh-button" id="refreshButton">Refresh Data</button>
+  </div>
+  
+  <div class="filter-container">
+    <label for="typeFilter">Error Type:</label>
+    <select id="typeFilter">
+      <option value="">All Error Types</option>
+    </select>
+  </div>
+  
+  <div class="filter-container">
+    <label for="monitorFilter">Monitor:</label>
+    <input type="text" id="monitorFilter" placeholder="Filter by monitor name...">
+  </div>
+  
+  <h2>Summary</h2>
+  <table id="summaryTable">
+    <thead>
+      <tr>
+        <th>Error Type</th>
+        <th>Monitor Count</th>
+        <th>Error Count</th>
+        <th>Latest Error</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  
+  <h2>Error Details</h2>
+  <table id="errorTable">
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Monitor Name</th>
+        <th>Error Message</th>
+        <th>First Seen</th>
+        <th>Last Seen</th>
+        <th>Count</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    // Get API endpoints - handle both /ui and direct root access
+    const basePath = window.location.pathname.includes('/ui') 
+      ? window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/ui'))
+      : '';
+      
+    const API_ENDPOINTS = {
+      summary: `${basePath}/api/invalid-records/summary`,
+      records: `${basePath}/api/invalid-records`
+    };
+    
+    // Fetch summary data
+    async function fetchSummary() {
+      try {
+        const response = await fetch(API_ENDPOINTS.summary);
+        if (!response.ok) throw new Error('Failed to fetch summary');
+        
+        const data = await response.json();
+        const tbody = document.querySelector('#summaryTable tbody');
+        tbody.innerHTML = '';
+        
+        if (data.length === 0) {
+          const row = document.createElement('tr');
+          row.innerHTML = '<td colspan="4" style="text-align: center;">No error records found</td>';
+          tbody.appendChild(row);
+          return;
+        }
+        
+        // Populate the summary table
+        data.forEach(item => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td><span class="type-badge badge-${getBadgeClass(item.type)}">${item.type}</span></td>
+            <td>${item.monitor_count}</td>
+            <td>${item.error_count}</td>
+            <td>${formatDate(item.latest_error)}</td>
+          `;
+          tbody.appendChild(row);
+        });
+        
+        // Populate type filter options
+        const typeFilter = document.getElementById('typeFilter');
+        // Clear existing options except the first one
+        while (typeFilter.options.length > 1) {
+          typeFilter.remove(1);
+        }
+        
+        // Add new options
+        data.forEach(item => {
+          const option = document.createElement('option');
+          option.value = item.type;
+          option.textContent = item.type;
+          typeFilter.appendChild(option);
+        });
+      } catch (error) {
+        console.error('Error fetching summary:', error);
+      }
+    }
+    
+    // Fetch error details
+    async function fetchErrors(type = '', monitor = '') {
+      try {
+        let url = API_ENDPOINTS.records;
+        const params = [];
+        
+        if (type) params.push(`type=${encodeURIComponent(type)}`);
+        if (monitor) params.push(`monitor=${encodeURIComponent(monitor)}`);
+        
+        if (params.length > 0) {
+          url += '?' + params.join('&');
+        }
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch error details');
+        
+        const data = await response.json();
+        const tbody = document.querySelector('#errorTable tbody');
+        tbody.innerHTML = '';
+        
+        if (data.length === 0) {
+          const row = document.createElement('tr');
+          row.innerHTML = '<td colspan="6" style="text-align: center;">No matching error records found</td>';
+          tbody.appendChild(row);
+          return;
+        }
+        
+        // Populate the errors table
+        data.forEach(item => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td><span class="type-badge badge-${getBadgeClass(item.type)}">${item.type}</span></td>
+            <td>${item.monitor_name || '-'}</td>
+            <td>${escapeHtml(item.error_message)}</td>
+            <td>${formatDate(item.first_seen)}</td>
+            <td>${formatDate(item.last_seen)}</td>
+            <td><span class="counter">${item.count}</span></td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        console.error('Error fetching errors:', error);
+      }
+    }
+    
+    // Helper function to format dates
+    function formatDate(dateStr) {
+      const date = new Date(dateStr);
+      return date.toLocaleString();
+    }
+    
+    // Helper function to get badge class
+    function getBadgeClass(type) {
+      if (type === 'monitor_transformation') return 'monitor_transformation';
+      if (type === 'elasticsearch_hits') return 'elasticsearch_hits';
+      if (type === 'business_context') return 'business_context';
+      return 'default';
+    }
+    
+    // Helper function to escape HTML
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    
+    // Update the last refresh time
+    function updateLastRefreshTime() {
+      const now = new Date();
+      document.getElementById('lastRefreshTime').textContent = now.toLocaleString();
+    }
+    
+    // Refresh all data
+    function refreshData() {
+      const typeFilter = document.getElementById('typeFilter').value;
+      const monitorFilter = document.getElementById('monitorFilter').value;
+      
+      fetchSummary();
+      fetchErrors(typeFilter, monitorFilter);
+      updateLastRefreshTime();
+    }
+    
+    // Set up event listeners
+    document.getElementById('typeFilter').addEventListener('change', function() {
+      fetchErrors(this.value, document.getElementById('monitorFilter').value);
+    });
+    
+    document.getElementById('monitorFilter').addEventListener('input', function() {
+      fetchErrors(document.getElementById('typeFilter').value, this.value);
+    });
+    
+    document.getElementById('refreshButton').addEventListener('click', refreshData);
+    
+    // Initial data load
+    refreshData();
+    
+    // Refresh data every 60 seconds
+    setInterval(refreshData, 60000);
+  </script>
+</body>
+</html>
