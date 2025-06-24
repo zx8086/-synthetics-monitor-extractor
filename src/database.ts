@@ -151,6 +151,19 @@ export function getInvalidRecordsSummary() {
   `).all();
 }
 
+// Delete a record by ID
+export function deleteInvalidRecord(id: number): boolean {
+  try {
+    const result = db.run(`DELETE FROM invalid_records WHERE id = $id`, {
+      $id: id
+    });
+    return result.changes > 0;
+  } catch (error) {
+    console.error(`Error deleting invalid record with ID ${id}:`, error);
+    return false;
+  }
+}
+
 // Close database connection
 export function closeDatabase() {
   db.close();

@@ -94,6 +94,24 @@
       cursor: pointer;
       border-radius: 4px;
     }
+    .delete-button {
+      background-color: #f44336;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 12px;
+      margin: 2px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .pending-delete {
+      color: #999;
+      font-size: 0.8rem;
+      font-style: italic;
+    }
     .header-actions {
       display: flex;
       justify-content: space-between;
@@ -121,10 +139,7 @@
     </select>
   </div>
   
-  <div class="filter-container">
-    <label for="monitorFilter">Monitor:</label>
-    <input type="text" id="monitorFilter" placeholder="Filter by monitor name...">
-  </div>
+  <!-- Search box removed as requested -->
   
   <h2>Summary</h2>
   <table id="summaryTable">
@@ -149,6 +164,7 @@
         <th>First Seen</th>
         <th>Last Seen</th>
         <th>Count</th>
+        <th>Actions</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -214,16 +230,12 @@
     }
     
     // Fetch error details
-    async function fetchErrors(type = '', monitor = '') {
+    async function fetchErrors(type = '') {
       try {
         let url = API_ENDPOINTS.records;
-        const params = [];
         
-        if (type) params.push(`type=${encodeURIComponent(type)}`);
-        if (monitor) params.push(`monitor=${encodeURIComponent(monitor)}`);
-        
-        if (params.length > 0) {
-          url += '?' + params.join('&');
+        if (type) {
+          url += `?type=${encodeURIComponent(type)}`;
         }
         
         const response = await fetch(url);
@@ -235,7 +247,7 @@
         
         if (data.length === 0) {
           const row = document.createElement('tr');
-          row.innerHTML = '<td colspan="6" style="text-align: center;">No matching error records found</td>';
+          row.innerHTML = '<td colspan="7" style="text-align: center;">No matching error records found</td>';
           tbody.appendChild(row);
           return;
         }
@@ -243,6 +255,12 @@
         // Populate the errors table
         data.forEach(item => {
           const row = document.createElement('tr');
+          const showDeleteButton = isOlderThan48Hours(item.last_seen);
+          
+          const deleteButtonHtml = showDeleteButton ? 
+            `<button class="delete-button" onclick="deleteRecord(${item.id})">Delete</button>` : 
+            '<span class="pending-delete">Not eligible for deletion yet</span>';
+          
           row.innerHTML = `
             <td><span class="type-badge badge-${getBadgeClass(item.type)}">${item.type}</span></td>
             <td>${item.monitor_name || '-'}</td>
@@ -250,6 +268,7 @@
             <td>${formatDate(item.first_seen)}</td>
             <td>${formatDate(item.last_seen)}</td>
             <td><span class="counter">${item.count}</span></td>
+            <td>${deleteButtonHtml}</td>
           `;
           tbody.appendChild(row);
         });
@@ -285,23 +304,53 @@
       document.getElementById('lastRefreshTime').textContent = now.toLocaleString();
     }
     
+    // Function to check if a record is older than 48 hours
+    function isOlderThan48Hours(dateStr) {
+      const recordDate = new Date(dateStr);
+      const now = new Date();
+      const hoursDiff = (now - recordDate) / (1000 * 60 * 60);
+      return hoursDiff >= 48;
+    }
+    
+    // Function to delete a record
+    async function deleteRecord(id) {
+      if (!confirm('Are you sure you want to delete this record?')) {
+        return;
+      }
+      
+      try {
+        const response = await fetch(`${API_ENDPOINTS.records}/delete/${id}`, {
+          method: 'DELETE'
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
+            refreshData();
+          } else {
+            alert('Failed to delete the record.');
+          }
+        } else {
+          alert('Error: ' + response.statusText);
+        }
+      } catch (error) {
+        console.error('Error deleting record:', error);
+        alert('Error deleting record: ' + error.message);
+      }
+    }
+    
     // Refresh all data
     function refreshData() {
       const typeFilter = document.getElementById('typeFilter').value;
-      const monitorFilter = document.getElementById('monitorFilter').value;
       
       fetchSummary();
-      fetchErrors(typeFilter, monitorFilter);
+      fetchErrors(typeFilter);
       updateLastRefreshTime();
     }
     
     // Set up event listeners
     document.getElementById('typeFilter').addEventListener('change', function() {
-      fetchErrors(this.value, document.getElementById('monitorFilter').value);
-    });
-    
-    document.getElementById('monitorFilter').addEventListener('input', function() {
-      fetchErrors(document.getElementById('typeFilter').value, this.value);
+      fetchErrors(this.value);
     });
     
     document.getElementById('refreshButton').addEventListener('click', refreshData);

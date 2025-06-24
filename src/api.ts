@@ -8,7 +8,8 @@ import {
   getAllInvalidRecords, 
   getInvalidRecordsByType, 
   getInvalidRecordsByMonitor,
-  getInvalidRecordsSummary
+  getInvalidRecordsSummary,
+  deleteInvalidRecord
 } from "./database.js";
 
 export function startApiServer(port: number = config.metrics.port): Server {
@@ -43,7 +44,23 @@ export function startApiServer(port: number = config.metrics.port): Server {
         }
       }
       
-      // Only accept GET requests for API endpoints
+      // Handle DELETE requests for the delete endpoint
+      if (req.method === "DELETE" && url.pathname.startsWith(`${config.api.invalidRecordsEndpoint}/delete/`)) {
+        const idStr = url.pathname.split('/').pop();
+        const id = parseInt(idStr || '', 10);
+        
+        if (isNaN(id)) {
+          return new Response(JSON.stringify({ error: "Invalid record ID" }), {
+            status: 400,
+            headers
+          });
+        }
+        
+        const success = deleteInvalidRecord(id);
+        return new Response(JSON.stringify({ success }), { headers });
+      }
+      
+      // Only accept GET requests for API endpoints (except the delete endpoint)
       if (req.method !== "GET" && !url.pathname.startsWith("/ui")) {
         return new Response(JSON.stringify({ error: "Method not allowed" }), {
           status: 405,
