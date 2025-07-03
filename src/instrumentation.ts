@@ -214,7 +214,14 @@ async function initializeOpenTelemetryInternal() {
         
         console.log("DEBUG: Creating PeriodicExportingMetricReader now...");
         console.log("DEBUG: Exporter being passed to PeriodicExportingMetricReader:", otlpMetricExporter.constructor.name);
-        console.log("DEBUG: Exporter instance:", otlpMetricExporter);
+        console.log("DEBUG: Exporter methods:", Object.getOwnPropertyNames(otlpMetricExporter).filter(name => typeof (otlpMetricExporter as any)[name] === 'function'));
+        
+        const originalExport = otlpMetricExporter.export.bind(otlpMetricExporter);
+        (otlpMetricExporter as any).export = function(metrics: any, callback: any) {
+          console.log("DEBUG: *** EXPORTER.EXPORT INTERCEPTED *** - This should be called by PeriodicExportingMetricReader");
+          console.log("DEBUG: Export intercepted at:", new Date().toISOString());
+          return originalExport(metrics, callback);
+        };
         
         otlpMetricReader = new PeriodicExportingMetricReader({
           exporter: otlpMetricExporter,
@@ -222,7 +229,7 @@ async function initializeOpenTelemetryInternal() {
           exportTimeoutMillis: exporterTimeout,
         });
         console.log("DEBUG: PeriodicExportingMetricReader constructor completed");
-        console.log("DEBUG: PeriodicExportingMetricReader internal exporter:", (otlpMetricReader as any)._exporter);
+        console.log("DEBUG: PeriodicExportingMetricReader internal exporter:", (otlpMetricReader as any)._exporter?.constructor?.name);
         
         log("DEBUG: PeriodicExportingMetricReader created successfully");
         log("DEBUG: Reader internal timeout should be:", exporterTimeout, "ms");
