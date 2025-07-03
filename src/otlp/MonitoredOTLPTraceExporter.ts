@@ -24,10 +24,13 @@ export class MonitoredOTLPTraceExporter extends MonitoredOTLPExporter<ReadableSp
       timeoutMillis: timeoutMillis,
       httpAgentOptions: {
         timeout: timeoutMillis,
-        keepAlive: false, // Disable keep-alive to avoid connection reuse issues
+        keepAlive: false,
+        keepAliveMsecs: 0,
+        maxSockets: 5,
+        maxFreeSockets: 2,
       },
     });
-    console.log(`DEBUG: OTLPTraceExporter created with timeout: ${timeoutMillis}ms`);
+    console.log(`DEBUG: OTLPTraceExporter created with timeout: ${timeoutMillis}ms and enhanced httpAgentOptions`);
   }
 
   async export(
@@ -48,51 +51,50 @@ export class MonitoredOTLPTraceExporter extends MonitoredOTLPExporter<ReadableSp
       log(`DEBUG: Export start time: ${new Date(startTime).toISOString()}`);
       log(`DEBUG: Number of spans: ${spans.length}`);
       
-      try {
-        await this.checkNetworkConnectivity();
-      } catch (connectivityError) {
-        const duration = Date.now() - startTime;
-        log(`DEBUG: Trace export CONNECTIVITY CHECK FAILED in ${duration}ms - skipping export`);
-        this.logDetailedFailure(connectivityError, spans.length, duration);
-        resultCallback({ code: 1, error: connectivityError instanceof Error ? connectivityError : new Error(String(connectivityError)) });
-        return;
-      }
-      
       this.logSystemResources();
 
-      const exportPromise = new Promise<ExportResult>((resolve, reject) => {
-        this.otlpExporter.export(spans, (result) => {
-          const duration = Date.now() - startTime;
-          log(`DEBUG: OTLP trace exporter callback received after ${duration}ms`);
-          resolve(result);
-        });
-      });
+      let timeoutFired = false;
+      const exportTimeout = setTimeout(() => {
+        timeoutFired = true;
+        const duration = Date.now() - startTime;
+        const timeoutError = new Error(`Trace export timeout after ${this.timeoutMillis}ms`);
+        this.logDetailedFailure(timeoutError, spans.length, duration);
+        log(`DEBUG: Trace export TIMEOUT in ${duration}ms`);
+        console.log(`DEBUG: *** TRACE EXPORT TIMEOUT *** after ${duration}ms`);
+        resultCallback({ code: 1, error: timeoutError });
+      }, this.timeoutMillis);
 
-      const timeoutPromise = new Promise<ExportResult>((_, reject) => {
-        setTimeout(() => {
-          reject(new Error(`Trace export timeout after ${this.timeoutMillis}ms`));
-        }, this.timeoutMillis);
+      this.otlpExporter.export(spans, (result) => {
+        if (timeoutFired) {
+          log(`DEBUG: OTLP trace exporter callback received after timeout - ignoring`);
+          console.log(`DEBUG: *** TRACE EXPORT CALLBACK AFTER TIMEOUT *** - ignoring`);
+          return;
+        }
+        
+        clearTimeout(exportTimeout);
+        const duration = Date.now() - startTime;
+        log(`DEBUG: OTLP trace exporter callback received after ${duration}ms`);
+        console.log(`DEBUG: *** TRACE EXPORT CALLBACK *** received after ${duration}ms`);
+        
+        if (result.code === 0) {
+          this.successfulExports++;
+          this.logSuccess(spans.length, duration);
+          log(`DEBUG: Trace export SUCCESS in ${duration}ms`);
+          console.log(`DEBUG: *** TRACE EXPORT SUCCESS *** in ${duration}ms`);
+        } else {
+          this.logDetailedFailure(result.error, spans.length, duration);
+          log(`DEBUG: Trace export FAILED in ${duration}ms - Error:`, result.error?.message || result.error);
+          console.log(`DEBUG: *** TRACE EXPORT FAILED *** in ${duration}ms - Error:`, result.error?.message || result.error);
+        }
+        
+        this.logExportDuration(startTime);
+        resultCallback(result);
       });
-
-      const result = await Promise.race([exportPromise, timeoutPromise]);
-      const duration = Date.now() - startTime;
-      
-      if (result.code === 0) {
-        this.successfulExports++;
-        this.logSuccess(spans.length, duration);
-        log(`DEBUG: Trace export SUCCESS in ${duration}ms`);
-      } else {
-        this.logDetailedFailure(result.error, spans.length, duration);
-        log(`DEBUG: Trace export FAILED in ${duration}ms - Error:`, result.error?.message || result.error);
-      }
-      
-      this.logExportDuration(startTime);
-      resultCallback(result);
-      
     } catch (error) {
       const duration = Date.now() - startTime;
       this.logDetailedFailure(error, spans.length, duration);
       log(`DEBUG: Trace export EXCEPTION in ${duration}ms - Error:`, error instanceof Error ? error.message : error);
+      console.log(`DEBUG: *** TRACE EXPORT EXCEPTION *** in ${duration}ms - Error:`, error instanceof Error ? error.message : error);
       resultCallback({ code: 1, error: error instanceof Error ? error : new Error(String(error)) });
     }
   }
