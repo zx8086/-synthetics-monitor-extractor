@@ -16,10 +16,12 @@ export class MonitoredOTLPMetricExporter extends MonitoredOTLPExporter<ResourceM
     timeoutMillis: number = 10000,
   ) {
     super(exporterConfig, exporterConfig.url || "", timeoutMillis);
+    log(`DEBUG: Creating OTLPMetricExporter with timeout ${timeoutMillis}ms for ${exporterConfig.url}`);
     this.otlpExporter = new OTLPMetricExporter({
       ...exporterConfig,
       timeoutMillis: timeoutMillis,
     });
+    log(`DEBUG: OTLPMetricExporter created successfully`);
   }
 
   async export(
@@ -30,6 +32,7 @@ export class MonitoredOTLPMetricExporter extends MonitoredOTLPExporter<ResourceM
     this.totalExports++;
 
     try {
+      log(`DEBUG: Starting metrics export to ${this.url} with timeout ${this.timeoutMillis}ms`);
       await this.checkNetworkConnectivity();
       this.logSystemResources();
 
@@ -41,8 +44,10 @@ export class MonitoredOTLPMetricExporter extends MonitoredOTLPExporter<ResourceM
           const metricCount = metrics.scopeMetrics?.reduce((acc, scope) => 
             acc + (scope.metrics?.length || 0), 0) || 0;
           this.logSuccess(metricCount, duration);
+          log(`DEBUG: Metrics export SUCCESS in ${duration}ms`);
         } else {
           this.logDetailedFailure(result.error, 1, duration);
+          log(`DEBUG: Metrics export FAILED in ${duration}ms - Error:`, result.error?.message || result.error);
         }
         
         this.logExportDuration(startTime);
@@ -51,6 +56,7 @@ export class MonitoredOTLPMetricExporter extends MonitoredOTLPExporter<ResourceM
     } catch (error) {
       const duration = Date.now() - startTime;
       this.logDetailedFailure(error, 1, duration);
+      log(`DEBUG: Metrics export EXCEPTION in ${duration}ms - Error:`, error instanceof Error ? error.message : error);
       resultCallback({ code: 1, error: error instanceof Error ? error : new Error(String(error)) });
     }
   }

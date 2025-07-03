@@ -230,23 +230,34 @@ export abstract class MonitoredOTLPExporter<T> {
     duration: number,
   ): void {
     const dnsStats = bunDns.getCacheStats();
-    err(`Failed to export ${itemCount} items after ${duration}ms:`);
-    if (error instanceof Error) {
-      err(`Error name: ${error.name}`);
-      err(`Error message: ${error.message}`);
-      err(`Stack trace: ${error.stack}`);
+    
+    if (error instanceof Error && error.message.includes("Request timed out")) {
+      err(`${this.exporterType} export TIMEOUT after ${duration}ms:`, {
+        error: error.message,
+        url: this.url,
+        timeout: `${this.timeoutMillis}ms`,
+        actualDuration: `${duration}ms`,
+        note: "This timeout is expected if OTLP collector is not available"
+      });
     } else {
-      err(`Unexpected error type:`, error);
+      err(`Failed to export ${itemCount} items after ${duration}ms:`);
+      if (error instanceof Error) {
+        err(`Error name: ${error.name}`);
+        err(`Error message: ${error.message}`);
+        err(`Stack trace: ${error.stack}`);
+      } else {
+        err(`Unexpected error type:`, error);
+      }
+      err(
+        `Current memory usage: ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB`,
+      );
+      err(`DNS Cache Status at failure:
+        Size: ${dnsStats.size}
+        Hits: ${dnsStats.cacheHitsCompleted}
+        Misses: ${dnsStats.cacheMisses}
+      `);
+      err(`Current time: ${new Date().toISOString()}`);
     }
-    err(
-      `Current memory usage: ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB`,
-    );
-    err(`DNS Cache Status at failure:
-      Size: ${dnsStats.size}
-      Hits: ${dnsStats.cacheHitsCompleted}
-      Misses: ${dnsStats.cacheMisses}
-    `);
-    err(`Current time: ${new Date().toISOString()}`);
   }
 
   protected async baseShutdown(): Promise<void> {

@@ -105,6 +105,7 @@ async function initializeOpenTelemetryInternal() {
 
       const resource = await createResource();
 
+      log("Creating trace exporter with endpoint:", config.openTelemetry.tracesEndpoint);
       const traceExporter = new MonitoredOTLPTraceExporter(
         {
           url: config.openTelemetry.tracesEndpoint,
@@ -113,7 +114,9 @@ async function initializeOpenTelemetryInternal() {
         },
         exporterTimeout,
       ) as unknown as SpanExporter;
+      log("Trace exporter created successfully");
 
+      log("Creating metric exporter with endpoint:", config.openTelemetry.metricsEndpoint);
       const otlpMetricExporter = new MonitoredOTLPMetricExporter(
         {
           url: config.openTelemetry.metricsEndpoint,
@@ -122,9 +125,9 @@ async function initializeOpenTelemetryInternal() {
         },
         exporterTimeout,
       ) as unknown as PushMetricExporter;
+      log("Metric exporter created successfully");
 
-      log("Metric exporter created with timeout:", exporterTimeout);
-
+      log("Creating log exporter with endpoint:", config.openTelemetry.logsEndpoint);
       const logExporter = new MonitoredOTLPLogExporter(
         {
           url: config.openTelemetry.logsEndpoint,
@@ -133,24 +136,9 @@ async function initializeOpenTelemetryInternal() {
         },
         exporterTimeout,
       ) as unknown as LogRecordExporter;
+      log("Log exporter created successfully");
 
-      log("Traces exporter created with config:", {
-        url: config.openTelemetry.tracesEndpoint,
-        interval: config.openTelemetry.metricReaderInterval,
-        summaryInterval: config.openTelemetry.summaryLogInterval,
-      });
-
-      log("Metrics exporter created with config:", {
-        url: config.openTelemetry.metricsEndpoint,
-        interval: config.openTelemetry.metricReaderInterval,
-        summaryInterval: config.openTelemetry.summaryLogInterval,
-      });
-
-      log("Logs exporter created with config:", {
-        url: config.openTelemetry.logsEndpoint,
-        interval: config.openTelemetry.metricReaderInterval,
-        summaryInterval: config.openTelemetry.summaryLogInterval,
-      });
+      log("All OTLP exporters created with 10s timeout configuration");
 
       const loggerProvider = new LoggerProvider({ resource });
       loggerProvider.addLogRecordProcessor(
@@ -163,11 +151,23 @@ async function initializeOpenTelemetryInternal() {
 
       api.logs.setGlobalLoggerProvider(loggerProvider);
 
+      log("Creating PeriodicExportingMetricReader with timeout:", exporterTimeout, "and interval:", config.openTelemetry.metricReaderInterval);
+      log("DEBUG: PeriodicExportingMetricReader config:", {
+        exportIntervalMillis: config.openTelemetry.metricReaderInterval,
+        exportTimeoutMillis: exporterTimeout,
+        metricsEndpoint: config.openTelemetry.metricsEndpoint
+      });
       const otlpMetricReader = new PeriodicExportingMetricReader({
         exporter: otlpMetricExporter,
         exportIntervalMillis: config.openTelemetry.metricReaderInterval,
         exportTimeoutMillis: exporterTimeout,
       });
+      log("PeriodicExportingMetricReader created successfully");
+      
+      log("DEBUG: Starting metrics reader to test connectivity...");
+      setTimeout(() => {
+        log("DEBUG: Metrics reader should have attempted first export by now");
+      }, 2000);
 
       const meterProvider = new MeterProvider({
         resource: resource,
