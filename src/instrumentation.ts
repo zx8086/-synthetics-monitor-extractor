@@ -166,6 +166,7 @@ async function initializeOpenTelemetryInternal() {
       const otlpMetricReader = new PeriodicExportingMetricReader({
         exporter: otlpMetricExporter,
         exportIntervalMillis: config.openTelemetry.metricReaderInterval,
+        exportTimeoutMillis: exporterTimeout,
       });
 
       const meterProvider = new MeterProvider({
