@@ -116,16 +116,7 @@ async function initializeOpenTelemetryInternal() {
       ) as unknown as SpanExporter;
       log("Trace exporter created successfully");
 
-      log("Creating metric exporter with endpoint:", config.openTelemetry.metricsEndpoint);
-      const otlpMetricExporter = new MonitoredOTLPMetricExporter(
-        {
-          url: config.openTelemetry.metricsEndpoint,
-          headers: { "Content-Type": "application/json" },
-          ...commonConfig,
-        },
-        exporterTimeout,
-      ) as unknown as PushMetricExporter;
-      log("Metric exporter created successfully");
+      log("Skipping OTLP metric exporter creation - using existing Prometheus metrics");
 
       log("Creating log exporter with endpoint:", config.openTelemetry.logsEndpoint);
       const logExporter = new MonitoredOTLPLogExporter(
