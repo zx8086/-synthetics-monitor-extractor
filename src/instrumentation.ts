@@ -105,29 +105,75 @@ async function initializeOpenTelemetryInternal() {
 
       const resource = await createResource();
 
-      log("DEBUG: Creating trace exporter with endpoint:", config.openTelemetry.tracesEndpoint, "timeout:", exporterTimeout);
-      const traceExporter = new MonitoredOTLPTraceExporter(
-        {
-          url: config.openTelemetry.tracesEndpoint,
-          headers: { "Content-Type": "application/json" },
-          ...commonConfig,
-        },
-        exporterTimeout,
-      ) as unknown as SpanExporter;
-      log("DEBUG: Trace exporter created successfully");
+      log("DEBUG: Testing trace endpoint connectivity before creating exporter:", config.openTelemetry.tracesEndpoint);
+      
+      let traceExporter: SpanExporter;
+      try {
+        const testResponse = await fetch(config.openTelemetry.tracesEndpoint, {
+          method: 'HEAD',
+          signal: AbortSignal.timeout(5000), // 5 second timeout for connectivity test
+        });
+        log("DEBUG: Trace endpoint connectivity test successful, creating exporter");
+        
+        traceExporter = new MonitoredOTLPTraceExporter(
+          {
+            url: config.openTelemetry.tracesEndpoint,
+            headers: { "Content-Type": "application/json" },
+            ...commonConfig,
+          },
+          exporterTimeout,
+        ) as unknown as SpanExporter;
+        log("DEBUG: Trace exporter created successfully");
+      } catch (connectivityError) {
+        log("DEBUG: Trace endpoint not reachable, creating no-op trace exporter");
+        log("DEBUG: Connectivity error:", connectivityError instanceof Error ? connectivityError.message : connectivityError);
+        
+        traceExporter = {
+          export: (spans: any, resultCallback: any) => {
+            log("DEBUG: No-op trace exporter - skipping export of", spans.length, "spans");
+            resultCallback({ code: 0 }); // Success without network call
+          },
+          forceFlush: async () => {},
+          shutdown: async () => {},
+        } as unknown as SpanExporter;
+        log("DEBUG: No-op trace exporter created successfully");
+      }
 
       log("Skipping OTLP metric exporter creation - using existing Prometheus metrics");
 
-      log("DEBUG: Creating log exporter with endpoint:", config.openTelemetry.logsEndpoint, "timeout:", exporterTimeout);
-      const logExporter = new MonitoredOTLPLogExporter(
-        {
-          url: config.openTelemetry.logsEndpoint,
-          headers: { "Content-Type": "application/json" },
-          ...commonConfig,
-        },
-        exporterTimeout,
-      ) as unknown as LogRecordExporter;
-      log("DEBUG: Log exporter created successfully");
+      log("DEBUG: Testing log endpoint connectivity before creating exporter:", config.openTelemetry.logsEndpoint);
+      
+      let logExporter: LogRecordExporter;
+      try {
+        const testResponse = await fetch(config.openTelemetry.logsEndpoint, {
+          method: 'HEAD',
+          signal: AbortSignal.timeout(5000), // 5 second timeout for connectivity test
+        });
+        log("DEBUG: Log endpoint connectivity test successful, creating exporter");
+        
+        logExporter = new MonitoredOTLPLogExporter(
+          {
+            url: config.openTelemetry.logsEndpoint,
+            headers: { "Content-Type": "application/json" },
+            ...commonConfig,
+          },
+          exporterTimeout,
+        ) as unknown as LogRecordExporter;
+        log("DEBUG: Log exporter created successfully");
+      } catch (connectivityError) {
+        log("DEBUG: Log endpoint not reachable, creating no-op log exporter");
+        log("DEBUG: Connectivity error:", connectivityError instanceof Error ? connectivityError.message : connectivityError);
+        
+        logExporter = {
+          export: (logs: any, resultCallback: any) => {
+            log("DEBUG: No-op log exporter - skipping export of", logs.length, "logs");
+            resultCallback({ code: 0 }); // Success without network call
+          },
+          forceFlush: async () => {},
+          shutdown: async () => {},
+        } as unknown as LogRecordExporter;
+        log("DEBUG: No-op log exporter created successfully");
+      }
 
       log("All OTLP exporters created with 10s timeout configuration");
 
