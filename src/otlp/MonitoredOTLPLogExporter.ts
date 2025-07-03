@@ -16,7 +16,10 @@ export class MonitoredOTLPLogExporter extends MonitoredOTLPExporter<ReadableLogR
     timeoutMillis: number = 10000,
   ) {
     super(exporterConfig, exporterConfig.url || "", timeoutMillis);
-    this.otlpExporter = new OTLPLogExporter(exporterConfig);
+    this.otlpExporter = new OTLPLogExporter({
+      ...exporterConfig,
+      timeoutMillis: timeoutMillis,
+    });
   }
 
   async export(

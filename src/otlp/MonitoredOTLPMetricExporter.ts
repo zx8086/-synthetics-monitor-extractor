@@ -16,7 +16,10 @@ export class MonitoredOTLPMetricExporter extends MonitoredOTLPExporter<ResourceM
     timeoutMillis: number = 10000,
   ) {
     super(exporterConfig, exporterConfig.url || "", timeoutMillis);
-    this.otlpExporter = new OTLPMetricExporter(exporterConfig);
+    this.otlpExporter = new OTLPMetricExporter({
+      ...exporterConfig,
+      timeoutMillis: timeoutMillis,
+    });
   }
 
   async export(

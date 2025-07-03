@@ -16,7 +16,10 @@ export class MonitoredOTLPTraceExporter extends MonitoredOTLPExporter<ReadableSp
     timeoutMillis: number = 10000,
   ) {
     super(exporterConfig, exporterConfig.url || "", timeoutMillis);
-    this.otlpExporter = new OTLPTraceExporter(exporterConfig);
+    this.otlpExporter = new OTLPTraceExporter({
+      ...exporterConfig,
+      timeoutMillis: timeoutMillis,
+    });
   }
 
   async export(
