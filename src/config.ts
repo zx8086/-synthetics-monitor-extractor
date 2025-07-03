@@ -98,8 +98,11 @@ const OpenTelemetryConfigSchema = z.object({
   metricsEndpoint: z.string().default("http://localhost:4318/v1/metrics"),
   logsEndpoint: z.string().default("http://localhost:4318/v1/logs"),
   serviceName: z.string().default("synthetics-monitor-extractor"),
+  serviceVersion: z.string().default("1.0.0"),
+  deploymentEnvironment: z.string().default("development"),
   metricIntervalMs: z.number().min(1000).max(60000).default(15000),
-  serviceVersion: z.string().optional(),
+  metricReaderInterval: z.number().default(60000),
+  summaryLogInterval: z.number().default(300000),
 });
 
 const ConfigSchema = z.object({
@@ -170,8 +173,11 @@ const defaultConfig: Config = {
     metricsEndpoint: "http://localhost:4318/v1/metrics",
     logsEndpoint: "http://localhost:4318/v1/logs",
     serviceName: "synthetics-monitor-extractor",
+    serviceVersion: "1.0.0",
+    deploymentEnvironment: "development",
     metricIntervalMs: 15000,
-    serviceVersion: undefined,
+    metricReaderInterval: 60000,
+    summaryLogInterval: 300000,
   },
   nodeEnv: "development",
 };
@@ -233,8 +239,11 @@ const envVarMapping = {
     metricsEndpoint: "OPEN_TELEMETRY_METRICS_ENDPOINT",
     logsEndpoint: "OPEN_TELEMETRY_LOGS_ENDPOINT",
     serviceName: "OPEN_TELEMETRY_SERVICE_NAME",
-    metricIntervalMs: "OPEN_TELEMETRY_METRIC_INTERVAL_MS",
     serviceVersion: "OPEN_TELEMETRY_SERVICE_VERSION",
+    deploymentEnvironment: "OPEN_TELEMETRY_DEPLOYMENT_ENVIRONMENT",
+    metricIntervalMs: "OPEN_TELEMETRY_METRIC_INTERVAL_MS",
+    metricReaderInterval: "OPEN_TELEMETRY_METRIC_READER_INTERVAL",
+    summaryLogInterval: "OPEN_TELEMETRY_SUMMARY_LOG_INTERVAL",
   },
   nodeEnv: "NODE_ENV",
 } as const;
@@ -375,8 +384,11 @@ function loadConfigFromEnv(): Partial<Config> {
     metricsEndpoint: getEnvConfig(envVarMapping.openTelemetry.metricsEndpoint, "string"),
     logsEndpoint: getEnvConfig(envVarMapping.openTelemetry.logsEndpoint, "string"),
     serviceName: getEnvConfig(envVarMapping.openTelemetry.serviceName, "string"),
-    metricIntervalMs: getEnvConfig(envVarMapping.openTelemetry.metricIntervalMs, "number"),
     serviceVersion: getEnvConfig(envVarMapping.openTelemetry.serviceVersion, "string"),
+    deploymentEnvironment: getEnvConfig(envVarMapping.openTelemetry.deploymentEnvironment, "string"),
+    metricIntervalMs: getEnvConfig(envVarMapping.openTelemetry.metricIntervalMs, "number"),
+    metricReaderInterval: getEnvConfig(envVarMapping.openTelemetry.metricReaderInterval, "number"),
+    summaryLogInterval: getEnvConfig(envVarMapping.openTelemetry.summaryLogInterval, "number"),
   };
 
   // Load NodeEnv

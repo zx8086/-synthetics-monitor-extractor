@@ -13,8 +13,14 @@ function getLogger(): winston.Logger {
   if (loggerInstance) return loggerInstance;
 
   // Import config at runtime to break circular dependency
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { config } = require("../config.js");
+  let config: any = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const configModule = require("../config.js");
+    config = configModule.config;
+  } catch (error) {
+    config = null;
+  }
 
   class OpenTelemetryHttpTransport extends TransportStream {
     constructor(options: any) {
@@ -22,7 +28,7 @@ function getLogger(): winston.Logger {
     }
 
     override async log(info: any, callback: () => void) {
-      if (config.openTelemetry.enabled) {
+      if (config?.openTelemetry?.enabled) {
         try {
           // Debug: Log the actual endpoint being used
           // eslint-disable-next-line no-console
@@ -31,13 +37,10 @@ function getLogger(): winston.Logger {
           const logData = {
             resourceLogs: [{
               resource: {
-                attributes: [
-                  { key: "service.name", value: { stringValue: config.openTelemetry.serviceName } },
-                  { key: "service.framework.name", value: { stringValue: "synthetics-monitor-extractor" } },
-                  { key: "service.language.name", value: { stringValue: "bun" } },
-                  { key: "agent.name", value: { stringValue: "bun" } },
-                  { key: "agent.version", value: { stringValue: config.openTelemetry.serviceVersion || "unknown" } },
-                ]
+                attributes: [{
+                  key: "service.name",
+                  value: { stringValue: config?.openTelemetry?.serviceName || "synthetics-monitor-extractor" }
+                }]
               },
               scopeLogs: [{
                 scope: {
@@ -62,7 +65,7 @@ function getLogger(): winston.Logger {
             }]
           };
 
-          const response = await fetch(config.openTelemetry.logsEndpoint, {
+          const response = await fetch(config?.openTelemetry?.logsEndpoint || "http://localhost:4318/v1/logs", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -76,7 +79,7 @@ function getLogger(): winston.Logger {
           }
         } catch (error) {
           // eslint-disable-next-line no-console
-          console.error(`Failed to send log to OpenTelemetry (endpoint: ${config.openTelemetry.logsEndpoint}):`, error);
+          console.error(`Failed to send log to OpenTelemetry (endpoint: ${config?.openTelemetry?.logsEndpoint || "http://localhost:4318/v1/logs"}):`, error);
         }
       }
       callback();
@@ -129,7 +132,7 @@ function getLogger(): winston.Logger {
   );
 
   const transports: TransportStream[] = [];
-  if (config.openTelemetry.enabled) {
+  if (config?.openTelemetry?.enabled) {
     try {
       const otelTransport = new OpenTelemetryHttpTransport({
         level: config.logging.level,
@@ -142,7 +145,7 @@ function getLogger(): winston.Logger {
   }
 
   loggerInstance = winston.createLogger({
-    level: config.logging.level,
+    level: config?.logging?.level || 'info',
     format: customFormat,
     transports,
   });
@@ -224,4 +227,4 @@ export function debug(message: string, meta?: any): void {
   };
 
   getLogger().debug(logData);
-} 
+}  

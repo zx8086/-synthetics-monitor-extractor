@@ -1,0 +1,29 @@
+name: 'Setup Environment'
+description: 'Setup Bun and environment for synthetics-monitor-extractor'
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+
+    - name: Verify Bun installation
+      shell: bash
+      run: |
+        bun --version
+        echo "Bun installed successfully"
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        bun install --frozen-lockfile
+
+    - name: Setup environment variables
+      shell: bash
+      run: |
+        echo "NODE_ENV=production" >> $GITHUB_ENV
+        echo "OPEN_TELEMETRY_ENABLED=true" >> $GITHUB_ENV
+        echo "OPEN_TELEMETRY_SERVICE_NAME=synthetics-monitor-extractor" >> $GITHUB_ENV
+        echo "OPEN_TELEMETRY_SERVICE_VERSION=1.0.0" >> $GITHUB_ENV
+        echo "OPEN_TELEMETRY_DEPLOYMENT_ENVIRONMENT=production" >> $GITHUB_ENV
