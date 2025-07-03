@@ -166,9 +166,19 @@ async function initializeOpenTelemetryInternal() {
       try {
         const promClient = require('prom-client');
         const existingRegistry = promClient.register;
-        const existingMetrics = existingRegistry.getMetricsAsJSON();
-        console.log("DEBUG: Prometheus client found, existing metrics count:", existingMetrics.length);
-        log("DEBUG: Prometheus client found, checking existing metrics:", existingMetrics.length);
+        console.log("DEBUG: Prometheus registry found:", !!existingRegistry);
+        
+        let existingMetrics;
+        try {
+          existingMetrics = existingRegistry.getMetricsAsJSON();
+          console.log("DEBUG: Prometheus client found, existing metrics count:", existingMetrics ? existingMetrics.length : 'null');
+          console.log("DEBUG: Prometheus metrics names:", existingMetrics ? existingMetrics.map((m: any) => m.name).join(', ') : 'none');
+        } catch (metricsError) {
+          console.log("DEBUG: Error getting Prometheus metrics:", metricsError instanceof Error ? metricsError.message : String(metricsError));
+          existingMetrics = [];
+        }
+        
+        log("DEBUG: Prometheus client found, checking existing metrics:", existingMetrics ? existingMetrics.length : 0);
       } catch (error) {
         console.log("DEBUG: Prometheus client error:", error instanceof Error ? error.message : String(error));
         log("DEBUG: Prometheus client not found or error accessing:", error instanceof Error ? error.message : String(error));
@@ -176,21 +186,36 @@ async function initializeOpenTelemetryInternal() {
       
       let otlpMetricReader;
       try {
+        console.log("DEBUG: About to create PeriodicExportingMetricReader with config:", {
+          exportIntervalMillis: config.openTelemetry.metricReaderInterval,
+          exportTimeoutMillis: exporterTimeout,
+          exporterUrl: config.openTelemetry.metricsEndpoint
+        });
         log("DEBUG: Creating PeriodicExportingMetricReader with config:", {
           exportIntervalMillis: config.openTelemetry.metricReaderInterval,
           exportTimeoutMillis: exporterTimeout,
           exporterUrl: config.openTelemetry.metricsEndpoint
         });
         
+        console.log("DEBUG: Creating PeriodicExportingMetricReader now...");
         otlpMetricReader = new PeriodicExportingMetricReader({
           exporter: otlpMetricExporter,
           exportIntervalMillis: config.openTelemetry.metricReaderInterval,
           exportTimeoutMillis: exporterTimeout,
         });
+        console.log("DEBUG: PeriodicExportingMetricReader constructor completed");
         
         log("DEBUG: PeriodicExportingMetricReader created successfully");
         log("DEBUG: Reader internal timeout should be:", exporterTimeout, "ms");
+        
+        console.log("DEBUG: Setting up metrics export monitoring...");
+        setTimeout(() => {
+          console.log("DEBUG: First metrics export should have been attempted by now");
+          console.log("DEBUG: Current time:", new Date().toISOString());
+        }, config.openTelemetry.metricReaderInterval + 1000);
+        
       } catch (error) {
+        console.log("DEBUG: Error creating PeriodicExportingMetricReader:", error);
         err("DEBUG: Error creating PeriodicExportingMetricReader:", error);
         throw error;
       }
