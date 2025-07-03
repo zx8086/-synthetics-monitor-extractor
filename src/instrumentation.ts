@@ -213,12 +213,16 @@ async function initializeOpenTelemetryInternal() {
         });
         
         console.log("DEBUG: Creating PeriodicExportingMetricReader now...");
+        console.log("DEBUG: Exporter being passed to PeriodicExportingMetricReader:", otlpMetricExporter.constructor.name);
+        console.log("DEBUG: Exporter instance:", otlpMetricExporter);
+        
         otlpMetricReader = new PeriodicExportingMetricReader({
           exporter: otlpMetricExporter,
           exportIntervalMillis: config.openTelemetry.metricReaderInterval,
           exportTimeoutMillis: exporterTimeout,
         });
         console.log("DEBUG: PeriodicExportingMetricReader constructor completed");
+        console.log("DEBUG: PeriodicExportingMetricReader internal exporter:", (otlpMetricReader as any)._exporter);
         
         log("DEBUG: PeriodicExportingMetricReader created successfully");
         log("DEBUG: Reader internal timeout should be:", exporterTimeout, "ms");
