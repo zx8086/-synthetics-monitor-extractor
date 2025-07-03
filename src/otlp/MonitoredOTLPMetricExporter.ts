@@ -32,27 +32,44 @@ export class MonitoredOTLPMetricExporter extends MonitoredOTLPExporter<ResourceM
     this.totalExports++;
 
     try {
-      log(`DEBUG: Starting metrics export to ${this.url} with timeout ${this.timeoutMillis}ms`);
+      log(`DEBUG: METRICS EXPORT ATTEMPT #${this.totalExports} to ${this.url}`);
+      log(`DEBUG: Configured timeout: ${this.timeoutMillis}ms`);
+      log(`DEBUG: Export start time: ${new Date(startTime).toISOString()}`);
+      
       await this.checkNetworkConnectivity();
       this.logSystemResources();
 
-      this.otlpExporter.export(metrics, (result) => {
-        const duration = Date.now() - startTime;
-        
-        if (result.code === 0) {
-          this.successfulExports++;
-          const metricCount = metrics.scopeMetrics?.reduce((acc, scope) => 
-            acc + (scope.metrics?.length || 0), 0) || 0;
-          this.logSuccess(metricCount, duration);
-          log(`DEBUG: Metrics export SUCCESS in ${duration}ms`);
-        } else {
-          this.logDetailedFailure(result.error, 1, duration);
-          log(`DEBUG: Metrics export FAILED in ${duration}ms - Error:`, result.error?.message || result.error);
-        }
-        
-        this.logExportDuration(startTime);
-        resultCallback(result);
+      const exportPromise = new Promise<ExportResult>((resolve) => {
+        this.otlpExporter.export(metrics, (result) => {
+          const duration = Date.now() - startTime;
+          log(`DEBUG: OTLP exporter callback received after ${duration}ms`);
+          resolve(result);
+        });
       });
+
+      const timeoutPromise = new Promise<ExportResult>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`Metrics export timeout after ${this.timeoutMillis}ms`));
+        }, this.timeoutMillis);
+      });
+
+      const result = await Promise.race([exportPromise, timeoutPromise]);
+      const duration = Date.now() - startTime;
+      
+      if (result.code === 0) {
+        this.successfulExports++;
+        const metricCount = metrics.scopeMetrics?.reduce((acc, scope) => 
+          acc + (scope.metrics?.length || 0), 0) || 0;
+        this.logSuccess(metricCount, duration);
+        log(`DEBUG: Metrics export SUCCESS in ${duration}ms`);
+      } else {
+        this.logDetailedFailure(result.error, 1, duration);
+        log(`DEBUG: Metrics export FAILED in ${duration}ms - Error:`, result.error?.message || result.error);
+      }
+      
+      this.logExportDuration(startTime);
+      resultCallback(result);
+      
     } catch (error) {
       const duration = Date.now() - startTime;
       this.logDetailedFailure(error, 1, duration);
