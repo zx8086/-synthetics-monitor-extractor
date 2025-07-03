@@ -171,8 +171,13 @@ async function initializeOpenTelemetryInternal() {
         let existingMetrics;
         try {
           existingMetrics = existingRegistry.getMetricsAsJSON();
-          console.log("DEBUG: Prometheus client found, existing metrics count:", existingMetrics ? existingMetrics.length : 'null');
-          console.log("DEBUG: Prometheus metrics names:", existingMetrics ? existingMetrics.map((m: any) => m.name).join(', ') : 'none');
+          console.log("DEBUG: Prometheus getMetricsAsJSON() returned:", typeof existingMetrics, existingMetrics);
+          if (Array.isArray(existingMetrics)) {
+            console.log("DEBUG: Prometheus client found, existing metrics count:", existingMetrics.length);
+            console.log("DEBUG: Prometheus metrics names:", existingMetrics.map((m: any) => m.name).join(', '));
+          } else {
+            console.log("DEBUG: Prometheus getMetricsAsJSON() did not return an array, got:", existingMetrics);
+          }
         } catch (metricsError) {
           console.log("DEBUG: Error getting Prometheus metrics:", metricsError instanceof Error ? metricsError.message : String(metricsError));
           existingMetrics = [];
@@ -209,6 +214,13 @@ async function initializeOpenTelemetryInternal() {
         log("DEBUG: Reader internal timeout should be:", exporterTimeout, "ms");
         
         console.log("DEBUG: Setting up metrics export monitoring...");
+        console.log("DEBUG: Export interval is:", config.openTelemetry.metricReaderInterval, "ms");
+        console.log("DEBUG: First export should happen in:", config.openTelemetry.metricReaderInterval / 1000, "seconds");
+        
+        setTimeout(() => {
+          console.log("DEBUG: 5 seconds passed - checking if any unexpected early exports occurred");
+        }, 5000);
+        
         setTimeout(() => {
           console.log("DEBUG: First metrics export should have been attempted by now");
           console.log("DEBUG: Current time:", new Date().toISOString());
