@@ -5,9 +5,15 @@
   "private": true,
   "scripts": {
     "start": "bun run --watch src/index.ts",
+    "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist",
+    "docker:build": "docker build -t synthetics-monitor-extractor .",
+    "docker:run": "docker run -p 3001:3001 synthetics-monitor-extractor",
+    "security:scan": "snyk test --severity-threshold=high",
+    "security:code": "snyk code test --severity-threshold=high",
     "lint": "biome check ./src",
-    "format": "biome format --write ./src"
+    "format": "biome format --write ./src",
+    "health": "curl -f http://localhost:3001/metrics || exit 1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.0.6",
@@ -20,11 +26,16 @@
     "@elastic/ecs-winston-format": "^1.5.3",
     "@elastic/elasticsearch": "^9.0.3",
     "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/api-logs": "^0.202.0",
     "@opentelemetry/auto-instrumentations-node": "^0.60.1",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.202.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.202.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.202.0",
     "@opentelemetry/instrumentation-http": "^0.202.0",
+    "@opentelemetry/instrumentation-winston": "^0.39.0",
+    "@opentelemetry/otlp-exporter-base": "^0.202.0",
     "@opentelemetry/resources": "^2.0.1",
+    "@opentelemetry/sdk-logs": "^0.202.0",
     "@opentelemetry/sdk-metrics": "^2.0.1",
     "@opentelemetry/sdk-node": "^0.202.0",
     "@opentelemetry/sdk-trace-base": "^2.0.1",
