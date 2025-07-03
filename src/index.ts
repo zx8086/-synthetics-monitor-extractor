@@ -41,9 +41,7 @@ import {
 } from "./kafka.js";
 import { log, err, warn, debug } from "./utils/logger.js";
 
-console.log("DEBUG: Initializing Prometheus metrics after OpenTelemetry...");
 initializeMetrics();
-console.log("DEBUG: Prometheus metrics initialized successfully");
 
 // Main function to extract and process monitor data
 async function extractAndProcessMonitors() {

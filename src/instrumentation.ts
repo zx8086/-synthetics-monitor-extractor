@@ -98,11 +98,8 @@ export function initializeHttpMetrics() {
 async function initializeOpenTelemetryInternal() {
   const { log, warn, err } = require("./utils/logger.js");
   
-  console.log("DEBUG: initializeOpenTelemetryInternal called, INSTRUMENTATION_ENABLED:", INSTRUMENTATION_ENABLED);
-  
   if (INSTRUMENTATION_ENABLED) {
     try {
-      console.log("DEBUG: Starting OpenTelemetry SDK initialization...");
       log("Initializing OpenTelemetry SDK...");
       diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.INFO);
 
@@ -155,66 +152,21 @@ async function initializeOpenTelemetryInternal() {
       api.logs.setGlobalLoggerProvider(loggerProvider);
 
       log("Creating PeriodicExportingMetricReader with timeout:", exporterTimeout, "and interval:", config.openTelemetry.metricReaderInterval);
-      log("DEBUG: PeriodicExportingMetricReader config:", {
-        exportIntervalMillis: config.openTelemetry.metricReaderInterval,
-        exportTimeoutMillis: exporterTimeout,
-        metricsEndpoint: config.openTelemetry.metricsEndpoint
-      });
-      
-      console.log("DEBUG: About to check for Prometheus metrics conflict...");
-      log("DEBUG: Checking for potential Prometheus metrics conflict...");
-      try {
-        const promClient = require('prom-client');
-        const existingRegistry = promClient.register;
-        console.log("DEBUG: Prometheus registry found:", !!existingRegistry);
-        
-        let existingMetrics;
-        try {
-          const metricsResult = existingRegistry.getMetricsAsJSON();
-          console.log("DEBUG: Prometheus getMetricsAsJSON() returned:", typeof metricsResult, metricsResult);
-          
-          if (metricsResult && typeof metricsResult.then === 'function') {
-            console.log("DEBUG: Prometheus getMetricsAsJSON() returned a Promise, awaiting...");
-            existingMetrics = await metricsResult;
-            console.log("DEBUG: Prometheus Promise resolved to:", typeof existingMetrics, Array.isArray(existingMetrics) ? `array with ${existingMetrics.length} items` : existingMetrics);
-          } else {
-            existingMetrics = metricsResult;
-            console.log("DEBUG: Prometheus getMetricsAsJSON() returned directly:", typeof existingMetrics);
-          }
-          
-          if (Array.isArray(existingMetrics)) {
-            console.log("DEBUG: Prometheus client found, existing metrics count:", existingMetrics.length);
-            console.log("DEBUG: Prometheus metrics names:", existingMetrics.map((m: any) => m.name).join(', '));
-          } else {
-            console.log("DEBUG: Prometheus metrics result is not an array:", existingMetrics);
-          }
-        } catch (metricsError) {
-          console.log("DEBUG: Error getting Prometheus metrics:", metricsError instanceof Error ? metricsError.message : String(metricsError));
-          existingMetrics = [];
-        }
-        
-        log("DEBUG: Prometheus client found, checking existing metrics:", existingMetrics ? existingMetrics.length : 0);
-      } catch (error) {
-        console.log("DEBUG: Prometheus client error:", error instanceof Error ? error.message : String(error));
-        log("DEBUG: Prometheus client not found or error accessing:", error instanceof Error ? error.message : String(error));
-      }
       
       log("OTLP metrics export disabled to avoid conflict with existing Prometheus metrics system");
       log("Traces and logs will continue to be exported to OTLP endpoints");
       const otlpMetricReader = null;
       
-      log("DEBUG: OTLP metrics export disabled - using existing Prometheus metrics system");
 
-      log("DEBUG: Creating MeterProvider without OTLP metrics reader (using Prometheus instead)...");
+      log("Creating MeterProvider without OTLP metrics reader (using existing Prometheus metrics)");
       const meterProvider = new MeterProvider({
         resource: resource,
         readers: [], // No OTLP metric readers - using existing Prometheus metrics
       });
-      log("DEBUG: MeterProvider created successfully without OTLP metrics export");
+      log("MeterProvider created successfully");
 
-      log("DEBUG: Setting global MeterProvider...");
       metrics.setGlobalMeterProvider(meterProvider);
-      log("DEBUG: Global MeterProvider set successfully");
+      log("Global MeterProvider set successfully");
 
       try {
         meter = metrics.getMeter(
