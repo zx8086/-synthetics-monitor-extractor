@@ -157,24 +157,42 @@ async function initializeOpenTelemetryInternal() {
         exportTimeoutMillis: exporterTimeout,
         metricsEndpoint: config.openTelemetry.metricsEndpoint
       });
-      const otlpMetricReader = new PeriodicExportingMetricReader({
-        exporter: otlpMetricExporter,
-        exportIntervalMillis: config.openTelemetry.metricReaderInterval,
-        exportTimeoutMillis: exporterTimeout,
-      });
-      log("PeriodicExportingMetricReader created successfully");
+      
+      log("DEBUG: Checking for potential Prometheus metrics conflict...");
+      const promClientExists = typeof global.process !== 'undefined' && 
+                              global.process.versions && 
+                              global.process.versions.node;
+      log("DEBUG: Node.js environment detected:", promClientExists);
+      
+      let otlpMetricReader;
+      try {
+        log("DEBUG: Creating PeriodicExportingMetricReader...");
+        otlpMetricReader = new PeriodicExportingMetricReader({
+          exporter: otlpMetricExporter,
+          exportIntervalMillis: config.openTelemetry.metricReaderInterval,
+          exportTimeoutMillis: exporterTimeout,
+        });
+        log("DEBUG: PeriodicExportingMetricReader created successfully");
+      } catch (error) {
+        err("DEBUG: Error creating PeriodicExportingMetricReader:", error);
+        throw error;
+      }
       
       log("DEBUG: Starting metrics reader to test connectivity...");
       setTimeout(() => {
         log("DEBUG: Metrics reader should have attempted first export by now");
       }, 2000);
 
+      log("DEBUG: Creating MeterProvider with PeriodicExportingMetricReader...");
       const meterProvider = new MeterProvider({
         resource: resource,
         readers: [otlpMetricReader],
       });
+      log("DEBUG: MeterProvider created successfully");
 
+      log("DEBUG: Setting global MeterProvider...");
       metrics.setGlobalMeterProvider(meterProvider);
+      log("DEBUG: Global MeterProvider set successfully");
 
       try {
         meter = metrics.getMeter(
