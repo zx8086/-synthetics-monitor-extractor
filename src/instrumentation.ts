@@ -3,6 +3,11 @@
 import { metrics } from "@opentelemetry/api";
 import { config } from "./config.js";
 import { log, err } from "./utils/logger.js";
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { LoggerProvider, BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import * as api from "@opentelemetry/api-logs";
+import { detectResources } from "@opentelemetry/resources";
 
 const INSTRUMENTATION_ENABLED = config.openTelemetry.enabled && config.nodeEnv !== "development";
 log(`OpenTelemetry Instrumentation Enabled (instrumentation_event: ${INSTRUMENTATION_ENABLED})`);
@@ -10,6 +15,25 @@ log(`OpenTelemetry Instrumentation Enabled (instrumentation_event: ${INSTRUMENTA
 // Export necessary meters and counters
 export let httpRequestCounter: any = null;
 export let httpResponseTimeHistogram: any = null;
+
+// Read from env
+const SERVICE_NAME = Bun.env.OPEN_TELEMETRY_SERVICE_NAME || "synthetics-extractor-eu-b2b";
+const SERVICE_VERSION = Bun.env.OPEN_TELEMETRY_SERVICE_VERSION || "1.0.0";
+const SERVICE_ENV = Bun.env.OPEN_TELEMETRY_DEPLOYMENT_ENVIRONMENT || "production";
+const LOGS_ENDPOINT = Bun.env.OPEN_TELEMETRY_LOGS_ENDPOINT || "http://localhost:4318/v1/logs";
+
+// Export an async function to initialize OpenTelemetry logging
+export async function setupOtelLogger() {
+  const resource = await detectResources(); // Picks up all env attributes!
+  const loggerProvider = new LoggerProvider({ resource });
+  const exporter = new OTLPLogExporter({ url: process.env.OPEN_TELEMETRY_LOGS_ENDPOINT || Bun.env.OPEN_TELEMETRY_LOGS_ENDPOINT });
+  loggerProvider.addLogRecordProcessor(new BatchLogRecordProcessor(exporter));
+  api.logs.setGlobalLoggerProvider(loggerProvider);
+  return api.logs.getLogger(
+    process.env.OPEN_TELEMETRY_SERVICE_NAME || Bun.env.OPEN_TELEMETRY_SERVICE_NAME || "",
+    process.env.OPEN_TELEMETRY_SERVICE_VERSION || Bun.env.OPEN_TELEMETRY_SERVICE_VERSION || ""
+  );
+}
 
 export function initializeOpenTelemetry() {
     if (!INSTRUMENTATION_ENABLED) {
@@ -70,3 +94,10 @@ export function recordHttpResponseTime(duration: number, route: string, statusCo
         }
     }
 }
+
+// Example usage (remove or comment out in production):
+// otelLogger.emit({
+//   body: "Hello from OpenTelemetry logger!",
+//   severityNumber: 9,
+//   severityText: "INFO",
+// });

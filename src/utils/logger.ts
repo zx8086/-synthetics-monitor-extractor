@@ -31,10 +31,13 @@ function getLogger(): winston.Logger {
           const logData = {
             resourceLogs: [{
               resource: {
-                attributes: [{
-                  key: "service.name",
-                  value: { stringValue: config.openTelemetry.serviceName }
-                }]
+                attributes: [
+                  { key: "service.name", value: { stringValue: config.openTelemetry.serviceName } },
+                  { key: "service.framework.name", value: { stringValue: "synthetics-monitor-extractor" } },
+                  { key: "service.language.name", value: { stringValue: "bun" } },
+                  { key: "agent.name", value: { stringValue: "bun" } },
+                  { key: "agent.version", value: { stringValue: config.openTelemetry.serviceVersion || "unknown" } },
+                ]
               },
               scopeLogs: [{
                 scope: {

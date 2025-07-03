@@ -99,6 +99,7 @@ const OpenTelemetryConfigSchema = z.object({
   logsEndpoint: z.string().default("http://localhost:4318/v1/logs"),
   serviceName: z.string().default("synthetics-monitor-extractor"),
   metricIntervalMs: z.number().min(1000).max(60000).default(15000),
+  serviceVersion: z.string().optional(),
 });
 
 const ConfigSchema = z.object({
@@ -170,6 +171,7 @@ const defaultConfig: Config = {
     logsEndpoint: "http://localhost:4318/v1/logs",
     serviceName: "synthetics-monitor-extractor",
     metricIntervalMs: 15000,
+    serviceVersion: undefined,
   },
   nodeEnv: "development",
 };
@@ -232,6 +234,7 @@ const envVarMapping = {
     logsEndpoint: "OPEN_TELEMETRY_LOGS_ENDPOINT",
     serviceName: "OPEN_TELEMETRY_SERVICE_NAME",
     metricIntervalMs: "OPEN_TELEMETRY_METRIC_INTERVAL_MS",
+    serviceVersion: "OPEN_TELEMETRY_SERVICE_VERSION",
   },
   nodeEnv: "NODE_ENV",
 } as const;
@@ -373,6 +376,7 @@ function loadConfigFromEnv(): Partial<Config> {
     logsEndpoint: getEnvConfig(envVarMapping.openTelemetry.logsEndpoint, "string"),
     serviceName: getEnvConfig(envVarMapping.openTelemetry.serviceName, "string"),
     metricIntervalMs: getEnvConfig(envVarMapping.openTelemetry.metricIntervalMs, "number"),
+    serviceVersion: getEnvConfig(envVarMapping.openTelemetry.serviceVersion, "string"),
   };
 
   // Load NodeEnv
