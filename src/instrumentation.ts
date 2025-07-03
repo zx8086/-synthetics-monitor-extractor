@@ -199,71 +199,18 @@ async function initializeOpenTelemetryInternal() {
         log("DEBUG: Prometheus client not found or error accessing:", error instanceof Error ? error.message : String(error));
       }
       
-      let otlpMetricReader;
-      try {
-        console.log("DEBUG: About to create PeriodicExportingMetricReader with config:", {
-          exportIntervalMillis: config.openTelemetry.metricReaderInterval,
-          exportTimeoutMillis: exporterTimeout,
-          exporterUrl: config.openTelemetry.metricsEndpoint
-        });
-        log("DEBUG: Creating PeriodicExportingMetricReader with config:", {
-          exportIntervalMillis: config.openTelemetry.metricReaderInterval,
-          exportTimeoutMillis: exporterTimeout,
-          exporterUrl: config.openTelemetry.metricsEndpoint
-        });
-        
-        console.log("DEBUG: Creating PeriodicExportingMetricReader now...");
-        console.log("DEBUG: Exporter being passed to PeriodicExportingMetricReader:", otlpMetricExporter.constructor.name);
-        console.log("DEBUG: Exporter methods:", Object.getOwnPropertyNames(otlpMetricExporter).filter(name => typeof (otlpMetricExporter as any)[name] === 'function'));
-        
-        const originalExport = otlpMetricExporter.export.bind(otlpMetricExporter);
-        (otlpMetricExporter as any).export = function(metrics: any, callback: any) {
-          console.log("DEBUG: *** EXPORTER.EXPORT INTERCEPTED *** - This should be called by PeriodicExportingMetricReader");
-          console.log("DEBUG: Export intercepted at:", new Date().toISOString());
-          return originalExport(metrics, callback);
-        };
-        
-        otlpMetricReader = new PeriodicExportingMetricReader({
-          exporter: otlpMetricExporter,
-          exportIntervalMillis: config.openTelemetry.metricReaderInterval,
-          exportTimeoutMillis: exporterTimeout,
-        });
-        console.log("DEBUG: PeriodicExportingMetricReader constructor completed");
-        console.log("DEBUG: PeriodicExportingMetricReader internal exporter:", (otlpMetricReader as any)._exporter?.constructor?.name);
-        
-        log("DEBUG: PeriodicExportingMetricReader created successfully");
-        log("DEBUG: Reader internal timeout should be:", exporterTimeout, "ms");
-        
-        console.log("DEBUG: Setting up metrics export monitoring...");
-        console.log("DEBUG: Export interval is:", config.openTelemetry.metricReaderInterval, "ms");
-        console.log("DEBUG: First export should happen in:", config.openTelemetry.metricReaderInterval / 1000, "seconds");
-        
-        setTimeout(() => {
-          console.log("DEBUG: 5 seconds passed - checking if any unexpected early exports occurred");
-        }, 5000);
-        
-        setTimeout(() => {
-          console.log("DEBUG: First metrics export should have been attempted by now");
-          console.log("DEBUG: Current time:", new Date().toISOString());
-        }, config.openTelemetry.metricReaderInterval + 1000);
-        
-      } catch (error) {
-        console.log("DEBUG: Error creating PeriodicExportingMetricReader:", error);
-        err("DEBUG: Error creating PeriodicExportingMetricReader:", error);
-        throw error;
-      }
+      log("OTLP metrics export disabled to avoid conflict with existing Prometheus metrics system");
+      log("Traces and logs will continue to be exported to OTLP endpoints");
+      const otlpMetricReader = null;
       
-      log("DEBUG: Starting metrics reader to test connectivity...");
-      setTimeout(() => {
-        log("DEBUG: Metrics reader should have attempted first export by now");
-      }, 2000);
+      log("DEBUG: OTLP metrics export disabled - using existing Prometheus metrics system");
 
-      log("DEBUG: Creating MeterProvider with PeriodicExportingMetricReader...");
+      log("DEBUG: Creating MeterProvider without OTLP metrics reader (using Prometheus instead)...");
       const meterProvider = new MeterProvider({
         resource: resource,
-        readers: [otlpMetricReader],
+        readers: [], // No OTLP metric readers - using existing Prometheus metrics
       });
-      log("DEBUG: MeterProvider created successfully");
+      log("DEBUG: MeterProvider created successfully without OTLP metrics export");
 
       log("DEBUG: Setting global MeterProvider...");
       metrics.setGlobalMeterProvider(meterProvider);
