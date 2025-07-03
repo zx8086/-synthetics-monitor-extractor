@@ -1,6 +1,7 @@
 /* src/config.ts */
 
 import { z } from "zod";
+import { log, err, warn } from "./utils/logger.js";
 
 const ElasticsearchConfigSchema = z
   .object({
@@ -91,6 +92,15 @@ const ApiConfigSchema = z.object({
   uiEndpoint: z.string().default("/ui"),
 });
 
+const OpenTelemetryConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  tracesEndpoint: z.string().default("http://localhost:4318/v1/traces"),
+  metricsEndpoint: z.string().default("http://localhost:4318/v1/metrics"),
+  logsEndpoint: z.string().default("http://localhost:4318/v1/logs"),
+  serviceName: z.string().default("synthetics-monitor-extractor"),
+  metricIntervalMs: z.number().min(1000).max(60000).default(15000),
+});
+
 const ConfigSchema = z.object({
   elasticsearch: ElasticsearchConfigSchema,
   kafka: KafkaConfigSchema,
@@ -98,6 +108,7 @@ const ConfigSchema = z.object({
   logging: LoggingConfigSchema,
   metrics: MetricsConfigSchema,
   api: ApiConfigSchema,
+  openTelemetry: OpenTelemetryConfigSchema,
   nodeEnv: z
     .enum(["development", "production", "staging"])
     .default("development"),
@@ -152,6 +163,14 @@ const defaultConfig: Config = {
     invalidRecordsEndpoint: "/api/invalid-records",
     uiEndpoint: "/ui",
   },
+  openTelemetry: {
+    enabled: false,
+    tracesEndpoint: "http://localhost:4318/v1/traces",
+    metricsEndpoint: "http://localhost:4318/v1/metrics",
+    logsEndpoint: "http://localhost:4318/v1/logs",
+    serviceName: "synthetics-monitor-extractor",
+    metricIntervalMs: 15000,
+  },
   nodeEnv: "development",
 };
 
@@ -205,6 +224,14 @@ const envVarMapping = {
     enabled: "API_ENABLED",
     invalidRecordsEndpoint: "API_INVALID_RECORDS_ENDPOINT",
     uiEndpoint: "API_UI_ENDPOINT",
+  },
+  openTelemetry: {
+    enabled: "OPEN_TELEMETRY_ENABLED",
+    tracesEndpoint: "OPEN_TELEMETRY_TRACES_ENDPOINT",
+    metricsEndpoint: "OPEN_TELEMETRY_METRICS_ENDPOINT",
+    logsEndpoint: "OPEN_TELEMETRY_LOGS_ENDPOINT",
+    serviceName: "OPEN_TELEMETRY_SERVICE_NAME",
+    metricIntervalMs: "OPEN_TELEMETRY_METRIC_INTERVAL_MS",
   },
   nodeEnv: "NODE_ENV",
 } as const;
@@ -338,6 +365,16 @@ function loadConfigFromEnv(): Partial<Config> {
     uiEndpoint: getEnvConfig(envVarMapping.api.uiEndpoint, "string"),
   };
 
+  // Load OpenTelemetry config
+  envConfig.openTelemetry = {
+    enabled: getEnvConfig(envVarMapping.openTelemetry.enabled, "boolean"),
+    tracesEndpoint: getEnvConfig(envVarMapping.openTelemetry.tracesEndpoint, "string"),
+    metricsEndpoint: getEnvConfig(envVarMapping.openTelemetry.metricsEndpoint, "string"),
+    logsEndpoint: getEnvConfig(envVarMapping.openTelemetry.logsEndpoint, "string"),
+    serviceName: getEnvConfig(envVarMapping.openTelemetry.serviceName, "string"),
+    metricIntervalMs: getEnvConfig(envVarMapping.openTelemetry.metricIntervalMs, "number"),
+  };
+
   // Load NodeEnv
   envConfig.nodeEnv = getEnvConfig(envVarMapping.nodeEnv, "string");
 
@@ -352,11 +389,12 @@ function loadConfigFromEnv(): Partial<Config> {
     logging: { ...defaultConfig.logging, ...envConfig.logging },
     metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
     api: { ...defaultConfig.api, ...envConfig.api },
+    openTelemetry: { ...defaultConfig.openTelemetry, ...envConfig.openTelemetry },
     nodeEnv: envConfig.nodeEnv || defaultConfig.nodeEnv,
   });
 
   if (!result.success) {
-    console.error("Configuration validation failed:", result.error.format());
+    err(`❌ Configuration validation failed: ${result.error.format()}`);
     throw new Error(
       "Invalid configuration: " +
         JSON.stringify(result.error.format(), null, 2),
@@ -450,21 +488,15 @@ let config: Config;
 try {
   const envValidation = validateEnvironment();
   if (!envValidation.valid) {
-    console.error(
-      "❌ Environment validation failed:",
-      envValidation.errors.join(", "),
-    );
+    err(`❌ Environment validation failed: ${envValidation.errors.join(", ")}`);
     if (envValidation.warnings && envValidation.warnings.length > 0) {
-      console.warn(
-        "⚠️ Environment warnings:",
-        envValidation.warnings.join(", "),
-      );
+      warn(`⚠️ Environment warnings: ${envValidation.warnings.join(", ")}`);
     }
     process.exit(1);
   }
 
   if (envValidation.warnings && envValidation.warnings.length > 0) {
-    console.warn("⚠️ Environment warnings:", envValidation.warnings.join(", "));
+    warn(`⚠️ Environment warnings: ${envValidation.warnings.join(", ")}`);
   }
 
   const envConfig = loadConfigFromEnv();
@@ -478,6 +510,7 @@ try {
     logging: { ...defaultConfig.logging, ...envConfig.logging },
     metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
     api: { ...defaultConfig.api, ...envConfig.api },  // Include api configuration
+    openTelemetry: { ...defaultConfig.openTelemetry, ...envConfig.openTelemetry },
     nodeEnv: envConfig.nodeEnv || defaultConfig.nodeEnv,
   };
 
@@ -487,54 +520,52 @@ try {
     config.nodeEnv === "development" ||
     getEnvValue("LOG_CONFIG") === "true"
   ) {
-    console.log(
-      "✅ Configuration loaded successfully:",
-      JSON.stringify(
-        {
-          elasticsearch: {
-            node: config.elasticsearch.node,
-            hasApiKey: !!config.elasticsearch.apiKey,
-            maxRetries: config.elasticsearch.maxRetries,
-            requestTimeout: config.elasticsearch.requestTimeout,
-          },
-          kafka: {
-            clientId: config.kafka.clientId,
-            brokers: config.kafka.brokers,
-            ssl: config.kafka.ssl,
-            hasAuth: !!config.kafka.username,
-            topicName: config.kafka.topicName,
-          },
-          extraction: {
-            intervalMinutes: config.extraction.intervalMinutes,
-            timeRange: config.extraction.timeRange,
-            indexPattern: config.extraction.indexPattern,
-          },
-          logging: {
-            level: config.logging.level,
-            format: config.logging.format,
-          },
-          metrics: {
-            enabled: config.metrics.enabled,
-            port: config.metrics.port,
-            prefix: config.metrics.prefix,
-          },
-          api: {
-            enabled: config.api.enabled,
-            invalidRecordsEndpoint: config.api.invalidRecordsEndpoint,
-            uiEndpoint: config.api.uiEndpoint,
-          },
-          nodeEnv: config.nodeEnv,
-        },
-        null,
-        2,
-      ),
-    );
+    log(`✅ Configuration loaded successfully: ${JSON.stringify({
+      elasticsearch: {
+        node: config.elasticsearch.node,
+        hasApiKey: !!config.elasticsearch.apiKey,
+        maxRetries: config.elasticsearch.maxRetries,
+        requestTimeout: config.elasticsearch.requestTimeout,
+      },
+      kafka: {
+        clientId: config.kafka.clientId,
+        brokers: config.kafka.brokers,
+        ssl: config.kafka.ssl,
+        hasAuth: !!config.kafka.username,
+        topicName: config.kafka.topicName,
+      },
+      extraction: {
+        intervalMinutes: config.extraction.intervalMinutes,
+        timeRange: config.extraction.timeRange,
+        indexPattern: config.extraction.indexPattern,
+      },
+      logging: {
+        level: config.logging.level,
+        format: config.logging.format,
+      },
+      metrics: {
+        enabled: config.metrics.enabled,
+        port: config.metrics.port,
+        prefix: config.metrics.prefix,
+      },
+      api: {
+        enabled: config.api.enabled,
+        invalidRecordsEndpoint: config.api.invalidRecordsEndpoint,
+        uiEndpoint: config.api.uiEndpoint,
+      },
+      openTelemetry: {
+        enabled: config.openTelemetry.enabled,
+        tracesEndpoint: config.openTelemetry.tracesEndpoint,
+        metricsEndpoint: config.openTelemetry.metricsEndpoint,
+        logsEndpoint: config.openTelemetry.logsEndpoint,
+        serviceName: config.openTelemetry.serviceName,
+        metricIntervalMs: config.openTelemetry.metricIntervalMs,
+      },
+      nodeEnv: config.nodeEnv,
+    })}`);
   }
 } catch (error) {
-  console.error(
-    "💥 Configuration validation failed:",
-    error instanceof Error ? error.message : String(error),
-  );
+  err(`💥 Configuration validation failed: ${error instanceof Error ? error.message : String(error)}`);
   throw new Error(
     "Invalid configuration: " +
       (error instanceof Error ? error.message : String(error)),
@@ -560,6 +591,7 @@ export function getConfigDocumentation(): Record<string, any> {
       logging: LoggingConfigSchema.describe("Logging configuration"),
       metrics: MetricsConfigSchema.describe("Metrics configuration"),
       api: ApiConfigSchema.describe("API and UI configuration"),
+      openTelemetry: OpenTelemetryConfigSchema.describe("OpenTelemetry configuration"),
     },
   };
 }

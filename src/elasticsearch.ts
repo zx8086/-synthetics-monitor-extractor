@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import * as tls from "tls";
 import * as http from "http";
 import * as https from "https";
+import { log, err, warn } from "./utils/logger.js";
 
 // Configure global agent defaults for keep-alive
 const httpAgent = new http.Agent({
@@ -31,7 +32,7 @@ let clientInstance: Client | null = null;
  */
 export function getElasticsearchClient(): Client {
   if (!clientInstance) {
-    console.log("Creating new Elasticsearch client with connection pooling");
+    log("Creating new Elasticsearch client with connection pooling");
     
     clientInstance = new Client({
       node: config.elasticsearch.node,
@@ -67,7 +68,7 @@ export function getElasticsearchClient(): Client {
     const interval = setInterval(() => {
       if (clientInstance) {
         clientInstance.ping()
-          .catch(err => console.warn("Elasticsearch ping failed:", err.message));
+          .catch(err => warn(`Elasticsearch ping failed: ${err.message}`));
       }
     }, 300000); // 5 minutes
 
@@ -75,7 +76,7 @@ export function getElasticsearchClient(): Client {
     process.on("beforeExit", () => {
       clearInterval(interval);
       if (clientInstance) {
-        console.log("Closing Elasticsearch client connections");
+        log("Closing Elasticsearch client connections");
         clientInstance.close();
         clientInstance = null;
       }
@@ -99,7 +100,7 @@ export async function executeSearch<T>(
     return response.hits.hits.map(hit => hit._source as T);
   } catch (error: any) {
     if (error.name === "TimeoutError") {
-      console.warn("Elasticsearch query timed out, retrying with longer timeout");
+      warn(`Elasticsearch query timed out, retrying with longer timeout (query: ${JSON.stringify(searchParams)})`);
       
       // Retry with longer timeout
       const retryResponse = await client.search<T>({
@@ -111,9 +112,9 @@ export async function executeSearch<T>(
     }
     
     // Log the detailed error
-    console.error("Elasticsearch search failed:", error.message);
+    err(`Elasticsearch search failed (elasticsearch_error: ${error.message})`);
     if (error.meta?.body) {
-      console.error("Error details:", JSON.stringify(error.meta.body, null, 2));
+      err(`Error details (elasticsearch_error_body: ${JSON.stringify(error.meta.body, null, 2)})`);
     }
     
     throw error;
@@ -125,7 +126,7 @@ export async function executeSearch<T>(
  */
 export async function closeElasticsearchClient(): Promise<void> {
   if (clientInstance) {
-    console.log("Closing Elasticsearch client connections");
+    log("Closing Elasticsearch client connections");
     await clientInstance.close();
     clientInstance = null;
   }
@@ -137,10 +138,10 @@ export async function closeElasticsearchClient(): Promise<void> {
 export async function checkElasticsearchHealth(): Promise<boolean> {
   try {
     const client = getElasticsearchClient();
-    const pingResult = await client.ping();
-    return !!pingResult;
+    await client.ping();
+    return true;
   } catch (error) {
-    console.error("Elasticsearch health check failed:", error);
+    err(`Elasticsearch health check failed (elasticsearch_error: ${error})`);
     return false;
   }
 } 

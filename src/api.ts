@@ -1,22 +1,30 @@
 /* src/api.ts */
 
-import { join } from "path";
 import type { Server } from "bun";
+import { join } from "node:path";
 import { config } from "./config.js";
 import { registry } from "./metrics.js";
 import {
-  getAllInvalidRecords,
-  getInvalidRecordsByType,
-  getInvalidRecordsByMonitor,
-  getInvalidRecordsSummary,
   deleteInvalidRecord,
+  getAllInvalidRecords,
+  getInvalidRecordsByMonitor,
+  getInvalidRecordsByType,
+  getInvalidRecordsSummary,
 } from "./database.js";
+import { recordHttpRequest, recordHttpResponseTime } from "./instrumentation.js";
+import { log, err } from "./utils/logger.js";
 
 export function startApiServer(port: number = config.metrics.port): Server {
   const server = Bun.serve({
     port,
     async fetch(req) {
+      const startTime = performance.now();
       const url = new URL(req.url);
+      const method = req.method;
+      const route = url.pathname;
+
+      // Record incoming request
+      recordHttpRequest(method, route);
 
       // Enable CORS
       const headers = {
@@ -28,19 +36,26 @@ export function startApiServer(port: number = config.metrics.port): Server {
 
       // Handle preflight requests
       if (req.method === "OPTIONS") {
-        return new Response(null, { headers });
+        const response = new Response(null, { headers });
+        // Record response time
+        recordHttpResponseTime(performance.now() - startTime, route, 200);
+        return response;
       }
 
       // Check if this is a Prometheus metrics request
       if (url.pathname === config.metrics.endpoint) {
         try {
           const metrics = await registry.metrics();
-          return new Response(metrics, {
+          const response = new Response(metrics, {
             headers: { "Content-Type": registry.contentType },
           });
+          recordHttpResponseTime(performance.now() - startTime, route, 200);
+          return response;
         } catch (error) {
-          console.error("Error generating metrics:", error);
-          return new Response("Internal Server Error", { status: 500 });
+          err("Error generating metrics:", error);
+          const response = new Response("Internal Server Error", { status: 500 });
+          recordHttpResponseTime(performance.now() - startTime, route, 500);
+          return response;
         }
       }
 
@@ -52,23 +67,29 @@ export function startApiServer(port: number = config.metrics.port): Server {
         const idStr = url.pathname.split("/").pop();
         const id = parseInt(idStr || "", 10);
 
-        if (isNaN(id)) {
-          return new Response(JSON.stringify({ error: "Invalid record ID" }), {
+        if (Number.isNaN(id)) {
+          const response = new Response(JSON.stringify({ error: "Invalid record ID" }), {
             status: 400,
             headers,
           });
+          recordHttpResponseTime(performance.now() - startTime, route, 400);
+          return response;
         }
 
         const success = deleteInvalidRecord(id);
-        return new Response(JSON.stringify({ success }), { headers });
+        const response = new Response(JSON.stringify({ success }), { headers });
+        recordHttpResponseTime(performance.now() - startTime, route, 200);
+        return response;
       }
 
       // Only accept GET requests for API endpoints (except the delete endpoint)
       if (req.method !== "GET" && !url.pathname.startsWith("/ui")) {
-        return new Response(JSON.stringify({ error: "Method not allowed" }), {
+        const response = new Response(JSON.stringify({ error: "Method not allowed" }), {
           status: 405,
           headers,
         });
+        recordHttpResponseTime(performance.now() - startTime, route, 405);
+        return response;
       }
 
       // Route handling
@@ -78,7 +99,7 @@ export function startApiServer(port: number = config.metrics.port): Server {
           const type = url.searchParams.get("type");
           const monitorName = url.searchParams.get("monitor");
 
-          let result;
+          let result: unknown;
 
           if (type) {
             result = getInvalidRecordsByType(type);
@@ -88,12 +109,16 @@ export function startApiServer(port: number = config.metrics.port): Server {
             result = getAllInvalidRecords();
           }
 
-          return new Response(JSON.stringify(result), { headers });
+          const response = new Response(JSON.stringify(result), { headers });
+          recordHttpResponseTime(performance.now() - startTime, route, 200);
+          return response;
         } else if (
           url.pathname === `${config.api.invalidRecordsEndpoint}/summary`
         ) {
           const summary = getInvalidRecordsSummary();
-          return new Response(JSON.stringify(summary), { headers });
+          const response = new Response(JSON.stringify(summary), { headers });
+          recordHttpResponseTime(performance.now() - startTime, route, 200);
+          return response;
         } else if (url.pathname === config.api.uiEndpoint) {
           // Format the KAFKA_CLIENT_ID for use in the title:
           // 1. Replace hyphens with spaces
@@ -126,11 +151,13 @@ export function startApiServer(port: number = config.metrics.port): Server {
               `<h1>${titlePrefix} Monitor Errors</h1>`,
             );
 
-          return new Response(modifiedHtml, {
+          const response = new Response(modifiedHtml, {
             headers: { "Content-Type": "text/html" },
           });
+          recordHttpResponseTime(performance.now() - startTime, route, 200);
+          return response;
         } else if (url.pathname === "/" || url.pathname === "/api") {
-          return new Response(
+          const response = new Response(
             JSON.stringify({
               message: "Synthetic Monitors API",
               endpoints: [
@@ -144,15 +171,19 @@ export function startApiServer(port: number = config.metrics.port): Server {
             }),
             { headers },
           );
+          recordHttpResponseTime(performance.now() - startTime, route, 200);
+          return response;
         }
 
-        return new Response(JSON.stringify({ error: "Not found" }), {
+        const response = new Response(JSON.stringify({ error: "Not found" }), {
           status: 404,
           headers,
         });
+        recordHttpResponseTime(performance.now() - startTime, route, 404);
+        return response;
       } catch (error) {
-        console.error("API error:", error);
-        return new Response(
+        err("API error:", error);
+        const response = new Response(
           JSON.stringify({
             error: "Internal server error",
             message: error instanceof Error ? error.message : String(error),
@@ -162,10 +193,12 @@ export function startApiServer(port: number = config.metrics.port): Server {
             headers,
           },
         );
+        recordHttpResponseTime(performance.now() - startTime, route, 500);
+        return response;
       }
     },
   });
 
-  console.log(`API server started on http://localhost:${port}`);
+  log(`API server started on http://localhost:${port}`);
   return server;
 }

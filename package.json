@@ -5,23 +5,36 @@
   "private": true,
   "scripts": {
     "start": "bun run --watch src/index.ts",
-    "test:validation": "bun run test-message-validation.ts",
-    "test:production": "bun run test-production-failures.ts",
-    "test:production-simple": "bun run test-production-simple.ts",
-    "test:schema": "bun run test-schema-investigation.ts"
+    "build": "bun build src/index.ts --outdir dist",
+    "lint": "biome check ./src",
+    "format": "biome format --write ./src"
   },
   "devDependencies": {
-    "@biomejs/biome": "1.9.4",
-    "@types/bun": "latest"
+    "@biomejs/biome": "2.0.6",
+    "@types/bun": "^1.2.17"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@elastic/elasticsearch": "^9.0.2",
-    "@platformatic/kafka": "^1.3.0",
+    "@elastic/ecs-winston-format": "^1.5.3",
+    "@elastic/elasticsearch": "^9.0.3",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.60.1",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.202.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.202.0",
+    "@opentelemetry/instrumentation-http": "^0.202.0",
+    "@opentelemetry/resources": "^2.0.1",
+    "@opentelemetry/sdk-metrics": "^2.0.1",
+    "@opentelemetry/sdk-node": "^0.202.0",
+    "@opentelemetry/sdk-trace-base": "^2.0.1",
+    "@opentelemetry/sdk-trace-node": "^2.0.1",
+    "@opentelemetry/semantic-conventions": "^1.34.0",
+    "@opentelemetry/winston-transport": "^0.13.0",
+    "@platformatic/kafka": "^1.7.0",
     "prom-client": "^15.1.3",
-    "zod": "^3.25.56"
+    "winston": "^3.17.0",
+    "zod": "^3.25.71"
   },
   "trustedDependencies": [
     "core-js"

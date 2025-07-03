@@ -11,6 +11,7 @@ import { kafkaMessageSizeHistogram } from "./metrics.js";
 import type { MonitorInfo } from "./types.js";
 import { writeInvalidRecords } from "./types.js";
 import { z } from "zod";
+import { log, err } from "./utils/logger.js";
 
 // Define Zod schemas for Kafka messages
 const KafkaHeaderSchema = z.record(z.string());
@@ -36,7 +37,7 @@ let producerInstance: KafkaProducer | null = null;
  */
 export function getKafkaProducer(): KafkaProducer {
   if (!producerInstance) {
-    console.log("Creating new Kafka producer");
+    log("Creating new Kafka producer");
 
     producerInstance = new Producer({
       clientId: config.kafka.clientId,
@@ -71,7 +72,7 @@ export function getKafkaProducer(): KafkaProducer {
     // Clean up on process exit - let the library handle the connection lifecycle
     process.on("SIGTERM", () => {
       closeKafkaProducer().catch((err) =>
-        console.error("Error closing Kafka producer:", err),
+        err("Error closing Kafka producer:", err),
       );
     });
   }
@@ -169,7 +170,7 @@ export async function sendMonitorDataToKafka(
   const singleTopicName = config.kafka.topicName;
 
   try {
-    console.log(
+    log(
       `Sending ${monitorData.length} messages to topic: ${singleTopicName}`,
     );
 
@@ -246,22 +247,12 @@ export async function sendMonitorDataToKafka(
       });
       
       if (differences.length > 0) {
-        console.error('Message content mismatch detected:', {
-          key: uniqueKey,
-          type: item.type,
-          differences,
-          original: originalDocument,
-          kafka: item
-        });
-        
+        err(`Message content mismatch detected (key: ${uniqueKey}, type: ${item.type}, differences: ${JSON.stringify(differences)})`);
         throw new Error('Message content validation failed - content is not identical');
       }
 
       // Log the message being sent
-      console.log('Sending message to Kafka:', {
-        key: uniqueKey,
-        type: item.type
-      });
+      log(`Sending message to Kafka: - ${uniqueKey} (type: ${item.type})`);
 
       // Create headers as a plain object instead of a Map
       const headers = createMessageHeaders(item);
@@ -279,16 +270,16 @@ export async function sendMonitorDataToKafka(
       acks: ProduceAcks.LEADER, // Only wait for leader acknowledgment
     });
 
-    console.log(
+    log(
       `Successfully sent ${messages.length} messages to ${singleTopicName}`,
     );
   } catch (error: any) {
     if (error.code === "PLT_KFK_PRODUCER_ERROR") {
-      console.error("Producer error:", error.message);
+      err(`Producer error: ${error.message}`);
     } else if (error.code === "PLT_KFK_CONNECTION_ERROR") {
-      console.error("Connection error:", error.message);
+      err(`Connection error: ${error.message}`);
     } else {
-      console.error("Error sending to Kafka:", error);
+      err(`Error sending to Kafka: ${error}`);
     }
     throw error;
   }
@@ -378,9 +369,8 @@ export async function checkKafkaConnection(): Promise<{
   monitoringTopics: string[];
 }> {
   try {
-    console.log(
-      "Checking Kafka connection at:",
-      config.kafka.brokers.join(","),
+    log(
+      `Checking Kafka connection at: ${config.kafka.brokers.join(",")}`
     );
 
     const admin = getKafkaAdmin();
@@ -402,8 +392,8 @@ export async function checkKafkaConnection(): Promise<{
       (topic) => typeof topic === "string" && topic.startsWith("monitoring."),
     );
 
-    console.log("✅ Successfully connected to Kafka");
-    console.log("📋 Available monitoring topics:", monitoringTopics);
+    log("✅ Successfully connected to Kafka");
+    log(`📋 Available monitoring topics: ${monitoringTopics}`);
 
     await admin.close();
 
@@ -413,8 +403,8 @@ export async function checkKafkaConnection(): Promise<{
       monitoringTopics,
     };
   } catch (error: any) {
-    console.error("❌ Failed to connect to Kafka");
-    console.error("Error details:", error?.message || "Unknown error");
+    log("❌ Failed to connect to Kafka");
+    log(`Error details: ${error?.message || "Unknown error"}`);
 
     return {
       connected: false,
@@ -429,7 +419,7 @@ export async function checkKafkaConnection(): Promise<{
  */
 export async function closeKafkaProducer(): Promise<void> {
   if (producerInstance) {
-    console.log("Closing Kafka producer");
+    log("Closing Kafka producer");
     await producerInstance.close();
     producerInstance = null;
   }

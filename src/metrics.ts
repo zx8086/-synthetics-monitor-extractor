@@ -2,6 +2,7 @@
 
 import * as promClient from 'prom-client';
 import { config } from './config.js';
+import { log } from './utils/logger.js';
 
 export let registry: promClient.Registry;
 export let kafkaMessageSizeHistogram: promClient.Histogram;
@@ -24,13 +25,13 @@ export function initializeMetrics() {
 }
 
 // Note: This is kept for backward compatibility but the actual server is started in api.ts
-export async function startMetricsServer() {
+export function startMetricsServer() {
   if (!config.metrics.enabled) {
-    console.log('Metrics disabled, skipping metrics server startup');
+    log('Metrics disabled, skipping metrics server startup');
     return;
   }
 
-  console.log(`Metrics will be available at ${config.metrics.endpoint} on the API server`);
+  log(`Metrics will be available at ${config.metrics.endpoint} on the API server`);
   // The actual server is started in api.ts to avoid port conflicts
   return null;
 }

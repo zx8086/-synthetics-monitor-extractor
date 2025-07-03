@@ -1,5 +1,9 @@
 /* src/index.ts */
 
+// Initialize OpenTelemetry FIRST before any other imports
+import { initializeOpenTelemetry } from "./instrumentation.js";
+const otelSdk = initializeOpenTelemetry();
+
 import { Client, estypes } from "@elastic/elasticsearch";
 import { HttpConnection } from "@elastic/transport";
 import type { MonitorInfo, SourceDocument, ElasticsearchHit } from "./types";
@@ -22,7 +26,7 @@ import {
   kafkaMessageSizeHistogram,
 } from "./metrics.js";
 import { initializeDatabase, closeDatabase } from "./database.js";
-import { startApiServer } from "./api.js";
+import { startApiServer } from "./api.js";  // Using the updated API server with OpenTelemetry logging
 import {
   getElasticsearchClient,
   executeSearch,
@@ -35,13 +39,14 @@ import {
   checkKafkaConnection,
   closeKafkaProducer,
 } from "./kafka.js";
+import { log, err, warn, debug } from "./utils/logger.js";
 
 initializeMetrics();
 
 // Main function to extract and process monitor data
 async function extractAndProcessMonitors() {
   try {
-    console.log("Starting synthetic monitor data extraction...");
+    log("Starting synthetic monitor data extraction...");
 
     // Clear the invalid records buffer at the start of each extraction
     clearInvalidRecordsBuffer();
@@ -51,32 +56,28 @@ async function extractAndProcessMonitors() {
     const isHealthy = await checkElasticsearchHealth();
 
     if (!isHealthy) {
-      console.error(
-        "❌ Elasticsearch connection failed - skipping this extraction cycle",
-      );
+      err("❌ Elasticsearch connection failed - skipping this extraction cycle");
       return;
     }
 
     // Check Kafka connection and list topics
     const { connected: isKafkaConnected } = await checkKafkaConnection();
     if (!isKafkaConnected) {
-      console.error(
-        "❌ Kafka connection failed - skipping this extraction cycle",
-      );
+      err("❌ Kafka connection failed - skipping this extraction cycle");
       return;
     }
 
-    console.log("Connected to Kafka");
+    log("Connected to Kafka");
 
     // Fetch all synthetic monitor data
     const monitorData = await fetchAllMonitorData();
 
     if (!monitorData || monitorData.length === 0) {
-      console.log("No monitor data found");
+      log("No monitor data found");
       return;
     }
 
-    console.log(`Retrieved ${monitorData.length} monitor records`);
+    log(`Retrieved ${monitorData.length} monitor records`);
 
     // Process and transform the monitor data
     const transformedData = await transformMonitorData(monitorData);
@@ -84,9 +85,9 @@ async function extractAndProcessMonitors() {
     // Send to Kafka topics using our service
     await sendMonitorDataToKafka(transformedData);
 
-    console.log("Monitor extraction completed successfully");
+    log("Monitor extraction completed successfully");
   } catch (error) {
-    console.error("Error in extraction process:", error);
+    err("Error in extraction process:", error);
   }
 }
 
@@ -158,8 +159,8 @@ async function fetchAllMonitorData() {
       ],
     };
 
-    console.log("Executing Elasticsearch query...");
-    console.log("Query parameters:", {
+    log("Executing Elasticsearch query...");
+    log("Query parameters:", {
       timeRange,
       size,
       index: config.extraction.indexPattern,
@@ -170,17 +171,19 @@ async function fetchAllMonitorData() {
     const client = getElasticsearchClient();
     const response = await client.search<ElasticsearchHit["_source"]>(query);
 
-    console.log("Query response:", {
-      total: response.hits.total,
-      took: response.took,
-      timed_out: response.timed_out,
-      hits: response.hits.hits.length,
+    log("Query response", {
+      elasticsearch_query: {
+        total: response.hits.total,
+        took: response.took,
+        timed_out: response.timed_out,
+        hits: response.hits.hits.length,
+      }
     });
 
     if (response.hits.hits.length === 0) {
-      console.log("No hits found. Checking if index exists...");
+      log("No hits found. Checking if index exists...");
       const indices = await client.cat.indices({ format: "json" });
-      console.log(
+      log(
         "Available indices:",
         indices.map((idx) => idx.index),
       );
@@ -191,7 +194,7 @@ async function fetchAllMonitorData() {
 
     // Validate the Elasticsearch hits using the old validation method
     const validatedHits = await validateElasticsearchHits(rawHits);
-    console.log(`Validated ${validatedHits.length} Elasticsearch hits`);
+    log(`Validated ${validatedHits.length} Elasticsearch hits`);
 
     // Count by dataset type
     const datasetCounts: Record<string, number> = {};
@@ -199,16 +202,24 @@ async function fetchAllMonitorData() {
       const dataset = hit._source.data_stream?.dataset || "unknown";
       datasetCounts[dataset] = (datasetCounts[dataset] || 0) + 1;
     });
-    console.log("Hits by dataset type:", datasetCounts);
+    log("Hits by dataset type", {
+      dataset_counts: datasetCounts
+    });
 
     return validatedHits;
   } catch (error: any) {
-    console.error(`Error fetching monitor data:`, error);
+    err(`Error fetching monitor data`, {
+      elasticsearch_error: error
+    });
     if (error.meta?.body) {
-      console.error("Elasticsearch response:", error.meta.body);
+      err("Elasticsearch response", {
+        elasticsearch_error_body: error.meta.body
+      });
     }
     if (error.meta?.statusCode) {
-      console.error("Status code:", error.meta.statusCode);
+      err("Status code", {
+        elasticsearch_status_code: error.meta.statusCode
+      });
     }
     return [];
   }
@@ -264,22 +275,63 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
     try {
       const businessContext = extractBusinessContext(hit._source);
       
-      const httpWithTls = hit._source.http
+      // Only include HTTP if it has the required response structure
+      const httpData = hit._source.http?.response?.status_code 
         ? {
-            ...hit._source.http,
-            ...(hit._source.http.tls ? { tls: hit._source.http.tls } : {}),
+            response: {
+              status_code: hit._source.http.response.status_code,
+              mime_type: hit._source.http.response.mime_type,
+              headers: hit._source.http.response.headers,
+              body: hit._source.http.response.body ? {
+                bytes: hit._source.http.response.body.bytes || 0,
+                content: hit._source.http.response.body.content || "",
+                hash: hit._source.http.response.body.hash || ""
+              } : undefined
+            },
+            ...(hit._source.http.rtt ? { rtt: hit._source.http.rtt } : {}),
+            ...(hit._source.http.state ? { 
+              state: typeof hit._source.http.state === 'string' 
+                ? hit._source.http.state 
+                : JSON.stringify(hit._source.http.state)
+            } : {})
           }
         : undefined;
+      
+      // Fix the port type issue by ensuring it's a number
+      const url = hit._source.url || {
+        scheme: undefined,
+        domain: undefined,
+        port: undefined,
+        path: undefined,
+        full: undefined
+      };
+      
+      // Convert port to number if it's a string
+      if (url.port && typeof url.port === 'string') {
+        url.port = parseInt(url.port, 10);
+      }
+      
+      // Only include data_stream if all required fields are present
+      const dataStream = hit._source.data_stream?.namespace && 
+                        hit._source.data_stream?.type && 
+                        hit._source.data_stream?.dataset
+        ? {
+            namespace: hit._source.data_stream.namespace,
+            type: hit._source.data_stream.type,
+            dataset: hit._source.data_stream.dataset
+          }
+        : undefined;
+      
       const transformedMonitor: MonitorInfo = {
         id: hit._source.monitor.id,
         name: hit._source.monitor.name,
         type: hit._source.monitor.type,
-        url: hit._source.url || {
-          scheme: undefined,
-          domain: undefined,
-          port: undefined,
-          path: undefined,
-          full: undefined
+        url: {
+          scheme: url.scheme,
+          domain: url.domain,
+          port: typeof url.port === 'number' ? url.port : undefined,
+          path: url.path,
+          full: url.full
         },
         timestamp: hit._source["@timestamp"],
         businessContext,
@@ -297,7 +349,7 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
           check_group: hit._source.monitor.check_group,
           project: hit._source.monitor.project
         },
-        ...(httpWithTls ? { http: httpWithTls } : {}),
+        ...(httpData ? { http: httpData } : {}),
         ...(hit._source.tcp ? { tcp: hit._source.tcp } : {}),
         ...(hit._source.icmp ? { icmp: hit._source.icmp } : {}),
         ...(hit._source.synthetics ? { synthetics: { type: hit._source.synthetics.type } } : {}),
@@ -327,7 +379,7 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
           type: hit._source.event.type,
           dataset: hit._source.event.dataset
         } } : {}),
-        ...(hit._source.data_stream ? { data_stream: hit._source.data_stream } : {}),
+        ...(dataStream ? { data_stream: dataStream } : {}),
         ...(hit._source.ecs ? { ecs: hit._source.ecs } : {}),
         ...(hit._source.config_id ? { config_id: hit._source.config_id } : {}),
         ...(hit._source.agent ? { agent: hit._source.agent } : {}),
@@ -359,25 +411,25 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
 
 // Start the extraction process on an interval
 async function startExtractionProcess() {
-  console.log("🚀 Starting synthetics monitor extractor...");
+  log("🚀 Starting synthetics monitor extractor...");
 
   try {
     // Initialize database
     initializeDatabase();
     
     // Start API server (combines metrics and invalid records API)
-    console.log(`Starting API server on port ${config.metrics.port}...`);
+    log(`Starting API server on port ${config.metrics.port}...`);
     const apiServer = startApiServer(config.metrics.port);
     
     // Initial connection validation
     const connectionValidation = await validateConnections();
 
     if (!connectionValidation.valid) {
-      console.error(
+      err(
         "❌ Connection validation failed:",
         connectionValidation.errors.join(", "),
       );
-      console.log(
+      log(
         "⚠️ Continuing with interval setup - connections will be retried during extraction cycles",
       );
     }
@@ -386,80 +438,93 @@ async function startExtractionProcess() {
       connectionValidation.warnings &&
       connectionValidation.warnings.length > 0
     ) {
-      console.log(
+      log(
         "✅ Connections validated:",
         connectionValidation.warnings.join(", "),
       );
     }
 
     // Initial run
-    console.log("Running initial data extraction...");
+    log("Running initial data extraction...");
     await extractAndProcessMonitors();
 
     // Set up interval for regular extraction
     const intervalMinutes = config.extraction.intervalMinutes;
-    console.log(
+    log(
       `Setting up extraction to run every ${intervalMinutes} minute(s)`
     );
 
     // Store the interval ID so we can clear it if needed
     const intervalId = setInterval(
       async () => {
-        console.log(
+        log(
           `\n🕒 Running scheduled extraction (every ${intervalMinutes} minutes)...`
         );
         try {
           await extractAndProcessMonitors();
-          console.log(`✅ Scheduled extraction completed successfully`);
+          log(`✅ Scheduled extraction completed successfully`);
         } catch (error) {
-          console.error(`❌ Scheduled extraction failed:`, error);
+          err(`❌ Scheduled extraction failed:`, error);
         }
       },
       intervalMinutes * 60 * 1000
     );
 
-    console.log(
+    log(
       `✅ Extraction interval set up successfully - will run every ${intervalMinutes} minute(s)`
     );
 
     // Clean up interval on process termination
     process.on("SIGTERM", () => {
-      console.log("Clearing extraction interval...");
+      log("Clearing extraction interval...");
       clearInterval(intervalId);
     });
   } catch (error) {
-    console.error("Failed to start extraction process:", error);
+    err("Failed to start extraction process:", error);
     throw error;
   }
 }
 
 // Ensure clean shutdown
 process.on("SIGTERM", async () => {
-  console.log("Received SIGTERM, shutting down gracefully");
+  log("Received SIGTERM, shutting down gracefully");
   try {
     await closeElasticsearchClient();
     await closeKafkaProducer();
     closeDatabase(); // Close the database connection
-    console.log("All connections closed successfully");
+    
+    // Shut down OpenTelemetry if it was initialized
+    if (otelSdk) {
+      await otelSdk.shutdown();
+    }
+    
+    log("All connections closed successfully");
   } catch (error) {
-    console.error("Error during shutdown:", error);
+    err("Error during shutdown:", error);
   }
+  console.log("Synthetics Monitor Extractor exited.");
   process.exit(0);
 });
 
 // Run the extraction process if this file is executed directly
 if (import.meta.main) {
+  // Print to stdout (not via logger)
+  console.log("Synthetics Monitor Extractor started.");
   (async () => {
     try {
       // Initialize metrics but don't start a separate server
       initializeMetrics();
       await startExtractionProcess();
     } catch (error) {
-      console.error("Failed to start extraction process:", error);
+      err("Failed to start extraction process:", error);
       process.exit(1);
     }
   })();
 }
+
+process.on("exit", () => {
+  console.log("Synthetics Monitor Extractor exited.");
+});
 
 export default {
   extractAndProcessMonitors,

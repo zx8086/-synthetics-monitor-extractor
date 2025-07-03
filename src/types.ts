@@ -5,6 +5,7 @@ import { writeFile } from "fs/promises";
 import { join } from "path";
 import fs from "fs";
 import { storeInvalidRecord } from "./database.js";
+import { log, warn } from "./utils/logger.js";
 
 export interface BusinessContext {
   domain: string;
@@ -764,7 +765,13 @@ export const ElasticsearchHitSchema = z.object({
 });
 
 // Helper function to write invalid records to database
-export function writeInvalidRecords(type: string, errors: Array<{ message: string }>, monitorName?: string): void {
+export async function writeInvalidRecords(
+  type: string,
+  errors: Array<{ message: string }>,
+  monitorName?: string,
+): Promise<void> {
+  log(`Database will handle invalid records tracking (type: ${type}, errors: ${JSON.stringify(errors)}, monitorName: ${monitorName})`);
+  
   for (const error of errors) {
     storeInvalidRecord(type, error.message, monitorName);
   }
@@ -772,7 +779,6 @@ export function writeInvalidRecords(type: string, errors: Array<{ message: strin
 
 // Function is maintained for backward compatibility but no longer needs to clear a buffer
 export function clearInvalidRecordsBuffer(): void {
-  console.log('Database will handle invalid records tracking');
   // No need to clear anything with the database approach
 }
 
@@ -808,7 +814,7 @@ export async function validateElasticsearchHits(data: unknown[]): Promise<Elasti
   for (const [monitorName, errorSet] of Object.entries(errorsByMonitor)) {
     if (errorSet.size > 0) {
       const errors = Array.from(errorSet).map(message => ({ message }));
-      writeInvalidRecords('elasticsearch_hits', errors, monitorName);
+      await writeInvalidRecords('elasticsearch_hits', errors, monitorName);
     }
   }
 
@@ -824,14 +830,14 @@ export async function validateMonitorInfo(data: unknown[]): Promise<MonitorInfo[
       const validatedInfo = MonitorInfoSchema.parse(info) as MonitorInfo;
       validMonitors.push(validatedInfo);
     } catch (error) {
-      console.warn("Skipping invalid monitor info:", error);
+      warn(`Skipping invalid monitor info (validation_error: ${error})`);
       errors.push(error);
       continue;
     }
   }
 
   if (errors.length > 0) {
-    writeInvalidRecords('monitor_info', errors.map(error => ({ message: error instanceof Error ? error.message : String(error) })), 'unknown');
+    await writeInvalidRecords('monitor_info', errors.map(error => ({ message: error instanceof Error ? error.message : String(error) })), 'unknown');
   }
 
   return validMonitors;
@@ -841,7 +847,7 @@ export async function validateBusinessContext(data: unknown): Promise<BusinessCo
   try {
     return BusinessContextSchema.parse(data);
   } catch (error) {
-    console.warn("Invalid business context:", error);
+    warn(`Invalid business context (validation_error: ${error})`);
     await writeInvalidRecords('business_context', [{ message: error instanceof Error ? error.message : String(error) }], 'unknown');
     throw error;
   }

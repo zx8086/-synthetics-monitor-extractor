@@ -1,9 +1,9 @@
 /* src/validation.ts */
 
-import { Client } from "@elastic/elasticsearch";
+import { Client, HttpConnection } from "@elastic/elasticsearch";
 import { Admin } from "@platformatic/kafka";
 import { config } from "./config.js";
-import { HttpConnection } from "@elastic/elasticsearch";
+import { log, err } from "./utils/logger.js";
 
 interface ValidationResult {
   valid: boolean;
@@ -12,161 +12,163 @@ interface ValidationResult {
 }
 
 export async function validateConnections(): Promise<ValidationResult> {
-  const errors: string[] = [];
-  const warnings: string[] = [];
+  const results = await Promise.allSettled([
+    validateElasticsearchConnection(),
+    validateKafkaConnection(),
+  ]);
 
-  // Validate Elasticsearch connection
-  const elasticResult = await validateElasticsearchConnection();
-  if (!elasticResult.valid) {
-    errors.push(...elasticResult.errors);
-  }
-  if (elasticResult.warnings) {
-    warnings.push(...elasticResult.warnings);
-  }
+  const allErrors: string[] = [];
+  const allWarnings: string[] = [];
 
-  // Validate Kafka connection
-  const kafkaResult = await validateKafkaConnection();
-  if (!kafkaResult.valid) {
-    errors.push(...kafkaResult.errors);
-  }
-  if (kafkaResult.warnings) {
-    warnings.push(...kafkaResult.warnings);
-  }
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled") {
+      const { errors, warnings } = result.value;
+      allErrors.push(...errors);
+      if (warnings) allWarnings.push(...warnings);
+    } else {
+      const serviceName = index === 0 ? "Elasticsearch" : "Kafka";
+      allErrors.push(`${serviceName} validation failed: ${result.reason}`);
+    }
+  });
 
   return {
-    valid: errors.length === 0,
-    errors,
-    warnings: warnings.length > 0 ? warnings : undefined,
+    valid: allErrors.length === 0,
+    errors: allErrors,
+    warnings: allWarnings.length > 0 ? allWarnings : undefined,
   };
 }
 
 async function validateElasticsearchConnection(): Promise<ValidationResult> {
-  const errors: string[] = [];
+  const _errors: string[] = [];
   const warnings: string[] = [];
 
   try {
+    log("Testing Elasticsearch connection (validation_event: elasticsearch)");
+
     const client = new Client({
       node: config.elasticsearch.node,
-      auth: {
-        apiKey: {
-          id: config.elasticsearch.apiKeyId || "",
-          api_key: config.elasticsearch.apiKey || "",
+      ...(config.elasticsearch.apiKeyId && config.elasticsearch.apiKey && {
+        auth: {
+          apiKey: {
+            id: config.elasticsearch.apiKeyId,
+            api_key: config.elasticsearch.apiKey,
+          },
         },
-      },
-      Connection: HttpConnection,
-      compression: true,
-      maxRetries: 5,
-      requestTimeout: 30000,
-      sniffOnStart: false,
-      name: "synthetics-extractor",
-      opaqueIdPrefix: "synthetics-extractor::",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "Accept-Encoding": "gzip, deflate",
-      },
-      context: {
-        userAgent: "synthetics-extractor/1.0.0 (bun)",
-      },
-      redaction: {
-        type: "replace",
-        additionalKeys: ["authorization", "x-elastic-client-meta"],
-      },
+      }),
+      maxRetries: config.elasticsearch.maxRetries,
+      requestTimeout: config.elasticsearch.requestTimeout,
+      compression: config.elasticsearch.compression,
+      sniffOnStart: config.elasticsearch.sniffOnStart,
       tls: {
-        rejectUnauthorized: config.nodeEnv === "production",
+        rejectUnauthorized: config.elasticsearch.rejectUnauthorized,
       },
+      name: config.elasticsearch.name,
+      opaqueIdPrefix: config.elasticsearch.opaqueIdPrefix,
     });
 
-    console.log("Testing Elasticsearch connection...");
-    
-    // First try a simple ping
-    const pingResponse = await client.ping();
-    if (!pingResponse) {
-      return {
-        valid: false,
-        errors: ["Elasticsearch ping failed"],
-      };
+    const response = await client.ping();
+    if (!response) {
+      _errors.push("Elasticsearch ping failed");
     }
 
-    // If ping succeeds, get cluster info
-    const info = await client.info();
-    if (!info || !info.version) {
-      return {
-        valid: false,
-        errors: ["Invalid response from Elasticsearch"],
-      };
+    // Test cluster health
+    const health = await client.cluster.health();
+    if (health.status === "red") {
+      warnings.push("Elasticsearch cluster health is RED");
+    } else if (health.status === "yellow") {
+      warnings.push("Elasticsearch cluster health is YELLOW");
     }
 
-    const serverVersion = info.version?.number || "0.0.0";
-    const majorVersion = parseInt(serverVersion.split('.')[0] || "0");
-    
-    if (majorVersion >= 9) {
-      warnings.push(`Server version ${serverVersion} detected - using modern Elasticsearch features`);
-    } else if (majorVersion >= 8) {
-      warnings.push(`Server version ${serverVersion} - full feature support`);
+    // Test index access
+    const indices = await client.cat.indices({ format: "json" });
+    const syntheticsIndices = indices.filter((idx: any) =>
+      idx.index.includes("synthetics"),
+    );
+
+    if (syntheticsIndices.length === 0) {
+      warnings.push("No synthetics indices found");
     } else {
-      warnings.push(`Server version ${serverVersion} - some features may be limited`);
+      log(`Found ${syntheticsIndices.length} synthetics indices (validation_event: elasticsearch)`);
     }
 
-    warnings.push(`Connected to Elasticsearch cluster: ${info.cluster_name}`);
+    await client.close();
 
     return {
       valid: true,
-      errors: [],
+      errors: _errors,
       warnings,
     };
   } catch (error: any) {
-    console.error("Elasticsearch connection error:", error);
+    err(`Elasticsearch connection error (validation_error: ${error})`);
     return {
       valid: false,
-      errors: [`Failed to connect to Elasticsearch: ${error.message}`],
+      errors: [
+        `Elasticsearch connection failed: ${error.message || "Unknown error"}`,
+      ],
+      warnings,
     };
   }
 }
 
 async function validateKafkaConnection(): Promise<ValidationResult> {
-  const errors: string[] = [];
+  const _errors: string[] = [];
   const warnings: string[] = [];
 
   try {
+    log("Testing Kafka connection (validation_event: kafka)");
+
     const admin = new Admin({
       clientId: config.kafka.clientId,
       bootstrapBrokers: config.kafka.brokers,
+
       ...(config.kafka.ssl && {
         tls: {
           rejectUnauthorized: true,
         },
       }),
-      ...(config.kafka.ssl && config.kafka.username && config.kafka.password && {
-        sasl: {
-          mechanism: "PLAIN" as const,
-          username: config.kafka.username,
-          password: config.kafka.password,
-        },
-      }),
+
+      ...(config.kafka.ssl &&
+        config.kafka.username &&
+        config.kafka.password && {
+          sasl: {
+            mechanism: "PLAIN" as const,
+            username: config.kafka.username,
+            password: config.kafka.password,
+          },
+        }),
     });
 
+    // Test connection by listing topics
     const metadata = await admin.metadata({ topics: [] });
     const topics = Array.from(metadata.topics.keys());
-    const monitoringTopics = topics.filter((topic: string) => topic.startsWith('monitoring.'));
+    const monitoringTopics = topics.filter((topic: string) =>
+      topic.includes("monitoring") || topic.includes("raw"),
+    );
 
     if (monitoringTopics.length === 0) {
-      warnings.push("No monitoring topics found in Kafka cluster");
-    } else {
-      warnings.push(`Found ${monitoringTopics.length} monitoring topics`);
+      warnings.push("No monitoring-related topics found");
+    }
+
+    // Check if our target topic exists
+    const targetTopicExists = topics.includes(config.kafka.topicName);
+    if (!targetTopicExists) {
+      warnings.push(`Target topic '${config.kafka.topicName}' not found`);
     }
 
     await admin.close();
 
     return {
       valid: true,
-      errors: [],
+      errors: _errors,
       warnings,
     };
   } catch (error: any) {
     return {
       valid: false,
-      errors: [`Failed to connect to Kafka: ${error.message}`],
+      errors: [
+        `Kafka connection failed: ${error.message || "Unknown error"}`,
+      ],
+      warnings,
     };
   }
 }

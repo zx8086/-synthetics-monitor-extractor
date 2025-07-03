@@ -3,6 +3,7 @@
 import { Database } from "bun:sqlite";
 import { join } from "path";
 import { existsSync, mkdirSync } from "fs";
+import { log, err } from "./utils/logger.js";
 
 // Ensure the data directory exists
 const DATA_DIR = join(import.meta.dir, "..", "data");
@@ -15,28 +16,37 @@ const db = new Database(join(DATA_DIR, "invalid_records.sqlite"), { create: true
 
 // Initialize the database schema
 export function initializeDatabase(): void {
-  console.log(`Initializing SQLite database at ${join(DATA_DIR, "invalid_records.sqlite")}...`);
-  
-  // Create table for invalid records if it doesn't exist
-  db.run(`
-    CREATE TABLE IF NOT EXISTS invalid_records (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT NOT NULL,
-      monitor_name TEXT,
-      error_message TEXT NOT NULL,
-      first_seen DATETIME NOT NULL,
-      last_seen DATETIME NOT NULL,
-      count INTEGER DEFAULT 1
-    )
-  `);
-  
-  // Create index for faster lookups
-  db.run(`
-    CREATE INDEX IF NOT EXISTS idx_monitor_type 
-    ON invalid_records(monitor_name, type)
-  `);
-  
-  console.log("Database initialized successfully");
+  try {
+    log(`Initializing SQLite database at ${join(DATA_DIR, "invalid_records.sqlite")}...`);
+    
+    // Create table for invalid records if it doesn't exist
+    db.run(`
+      CREATE TABLE IF NOT EXISTS invalid_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        monitor_name TEXT,
+        error_message TEXT NOT NULL,
+        first_seen DATETIME NOT NULL,
+        last_seen DATETIME NOT NULL,
+        count INTEGER DEFAULT 1
+      )
+    `);
+    
+    // Create index for faster lookups
+    db.run(`
+      CREATE INDEX IF NOT EXISTS idx_monitor_type 
+      ON invalid_records(monitor_name, type)
+    `);
+    
+    log("Database initialized successfully", {
+      database_event: "init"
+    });
+  } catch (error) {
+    err("Failed to initialize database", {
+      database_error: error
+    });
+    throw error;
+  }
 }
 
 // Store an invalid record
@@ -87,12 +97,16 @@ export function storeInvalidRecord(
       });
     }
   } catch (error) {
-    console.error("Error storing invalid record:", error);
+    err("Error storing invalid record", {
+      database_error: error
+    });
     if (error instanceof Error) {
-      console.error("Error details:", {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
+      err("Error details", {
+        database_error_details: {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        }
       });
     }
   }
@@ -159,7 +173,9 @@ export function deleteInvalidRecord(id: number): boolean {
     });
     return result.changes > 0;
   } catch (error) {
-    console.error(`Error deleting invalid record with ID ${id}:`, error);
+    err(`Error deleting invalid record with ID ${id}`, {
+      database_error: error
+    });
     return false;
   }
 }
