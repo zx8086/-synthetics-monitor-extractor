@@ -159,20 +159,30 @@ async function initializeOpenTelemetryInternal() {
       });
       
       log("DEBUG: Checking for potential Prometheus metrics conflict...");
-      const promClientExists = typeof global.process !== 'undefined' && 
-                              global.process.versions && 
-                              global.process.versions.node;
-      log("DEBUG: Node.js environment detected:", promClientExists);
+      try {
+        const promClient = require('prom-client');
+        const existingRegistry = promClient.register;
+        log("DEBUG: Prometheus client found, checking existing metrics:", existingRegistry.getMetricsAsJSON().length);
+      } catch (error) {
+        log("DEBUG: Prometheus client not found or error accessing:", error instanceof Error ? error.message : String(error));
+      }
       
       let otlpMetricReader;
       try {
-        log("DEBUG: Creating PeriodicExportingMetricReader...");
+        log("DEBUG: Creating PeriodicExportingMetricReader with config:", {
+          exportIntervalMillis: config.openTelemetry.metricReaderInterval,
+          exportTimeoutMillis: exporterTimeout,
+          exporterUrl: config.openTelemetry.metricsEndpoint
+        });
+        
         otlpMetricReader = new PeriodicExportingMetricReader({
           exporter: otlpMetricExporter,
           exportIntervalMillis: config.openTelemetry.metricReaderInterval,
           exportTimeoutMillis: exporterTimeout,
         });
+        
         log("DEBUG: PeriodicExportingMetricReader created successfully");
+        log("DEBUG: Reader internal timeout should be:", exporterTimeout, "ms");
       } catch (error) {
         err("DEBUG: Error creating PeriodicExportingMetricReader:", error);
         throw error;
