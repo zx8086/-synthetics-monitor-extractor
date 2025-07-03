@@ -40,7 +40,7 @@ export abstract class MonitoredOTLPExporter<T> {
   constructor(
     exporterConfig: OTLPExporterNodeConfigBase,
     endpoint: string,
-    timeoutMillis: number = 60000,
+    timeoutMillis: number = 10000,
   ) {
     this.url = exporterConfig.url || endpoint;
     this.timeoutMillis = timeoutMillis;

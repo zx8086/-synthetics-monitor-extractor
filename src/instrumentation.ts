@@ -1,9 +1,6 @@
 /* src/instrumentation.ts */
 
-import { debug, log, warn, err } from "./utils/logger.js";
 import { trace, context } from "@opentelemetry/api";
-
-log("Starting Application Instrumentation - Synthetics Monitor Extractor Service");
 
 import {
   diag,
@@ -39,17 +36,7 @@ import { WinstonInstrumentation } from "@opentelemetry/instrumentation-winston";
 import * as api from "@opentelemetry/api-logs";
 import { config } from "./config.js";
 
-log("Starting Instrumentation............");
-
 const INSTRUMENTATION_ENABLED = config.openTelemetry.enabled;
-log("OpenTelemetry Instrumentation Status", { INSTRUMENTATION_ENABLED });
-
-log("OpenTelemetry Environment Variables", {
-  OPEN_TELEMETRY_ENABLED: process.env["OPEN_TELEMETRY_ENABLED"],
-  PARSED_INSTRUMENTATION_ENABLED: INSTRUMENTATION_ENABLED,
-});
-
-log("Parsed INSTRUMENTATION_ENABLED:", { INSTRUMENTATION_ENABLED });
 
 let sdk: NodeSDK | undefined;
 let meter: Meter | undefined;
@@ -70,7 +57,7 @@ const createResource = async () => {
   );
 };
 
-const exporterTimeout = 300000;
+const exporterTimeout = 10000;
 
 const commonConfig = {
   timeoutMillis: exporterTimeout,
@@ -79,6 +66,8 @@ const commonConfig = {
 };
 
 export function initializeHttpMetrics() {
+  const { log, err } = require("./utils/logger.js");
+  
   if (INSTRUMENTATION_ENABLED && meter) {
     log("Initializing HTTP metrics");
     try {
@@ -107,6 +96,8 @@ export function initializeHttpMetrics() {
 }
 
 async function initializeOpenTelemetryInternal() {
+  const { log, warn, err } = require("./utils/logger.js");
+  
   if (INSTRUMENTATION_ENABLED) {
     try {
       log("Initializing OpenTelemetry SDK...");
@@ -266,6 +257,8 @@ async function initializeOpenTelemetryInternal() {
 }
 
 export function initializeOpenTelemetry() {
+  const { log } = require("./utils/logger.js");
+  
   if (!INSTRUMENTATION_ENABLED) {
     log("OpenTelemetry instrumentation is disabled (instrumentation_event: false)");
     return {
@@ -294,6 +287,8 @@ export function getMeter(): Meter | undefined {
 }
 
 export function recordHttpRequest(method: string, route: string) {
+  const { debug, warn, err } = require("./utils/logger.js");
+  
   if (INSTRUMENTATION_ENABLED) {
     if (httpRequestCounter) {
       httpRequestCounter.add(1, { method, route });
