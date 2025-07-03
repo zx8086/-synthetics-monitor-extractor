@@ -16,11 +16,19 @@ export class MonitoredOTLPMetricExporter extends MonitoredOTLPExporter<ResourceM
     timeoutMillis: number = 10000,
   ) {
     super(exporterConfig, exporterConfig.url || "", timeoutMillis);
+    console.log(`DEBUG: MonitoredOTLPMetricExporter constructor called with timeout ${timeoutMillis}ms for ${exporterConfig.url}`);
     log(`DEBUG: Creating OTLPMetricExporter with timeout ${timeoutMillis}ms for ${exporterConfig.url}`);
+    
+    console.log(`DEBUG: OTLPMetricExporter config:`, {
+      ...exporterConfig,
+      timeoutMillis: timeoutMillis,
+    });
+    
     this.otlpExporter = new OTLPMetricExporter({
       ...exporterConfig,
       timeoutMillis: timeoutMillis,
     });
+    console.log(`DEBUG: OTLPMetricExporter created successfully`);
     log(`DEBUG: OTLPMetricExporter created successfully`);
   }
 
@@ -32,6 +40,10 @@ export class MonitoredOTLPMetricExporter extends MonitoredOTLPExporter<ResourceM
     this.totalExports++;
 
     try {
+      console.log(`DEBUG: *** METRICS EXPORT CALLED *** #${this.totalExports} to ${this.url}`);
+      console.log(`DEBUG: Export called at: ${new Date(startTime).toISOString()}`);
+      console.log(`DEBUG: Configured timeout: ${this.timeoutMillis}ms`);
+      
       log(`DEBUG: METRICS EXPORT ATTEMPT #${this.totalExports} to ${this.url}`);
       log(`DEBUG: Configured timeout: ${this.timeoutMillis}ms`);
       log(`DEBUG: Export start time: ${new Date(startTime).toISOString()}`);

@@ -170,13 +170,23 @@ async function initializeOpenTelemetryInternal() {
         
         let existingMetrics;
         try {
-          existingMetrics = existingRegistry.getMetricsAsJSON();
-          console.log("DEBUG: Prometheus getMetricsAsJSON() returned:", typeof existingMetrics, existingMetrics);
+          const metricsResult = existingRegistry.getMetricsAsJSON();
+          console.log("DEBUG: Prometheus getMetricsAsJSON() returned:", typeof metricsResult, metricsResult);
+          
+          if (metricsResult && typeof metricsResult.then === 'function') {
+            console.log("DEBUG: Prometheus getMetricsAsJSON() returned a Promise, awaiting...");
+            existingMetrics = await metricsResult;
+            console.log("DEBUG: Prometheus Promise resolved to:", typeof existingMetrics, Array.isArray(existingMetrics) ? `array with ${existingMetrics.length} items` : existingMetrics);
+          } else {
+            existingMetrics = metricsResult;
+            console.log("DEBUG: Prometheus getMetricsAsJSON() returned directly:", typeof existingMetrics);
+          }
+          
           if (Array.isArray(existingMetrics)) {
             console.log("DEBUG: Prometheus client found, existing metrics count:", existingMetrics.length);
             console.log("DEBUG: Prometheus metrics names:", existingMetrics.map((m: any) => m.name).join(', '));
           } else {
-            console.log("DEBUG: Prometheus getMetricsAsJSON() did not return an array, got:", existingMetrics);
+            console.log("DEBUG: Prometheus metrics result is not an array:", existingMetrics);
           }
         } catch (metricsError) {
           console.log("DEBUG: Error getting Prometheus metrics:", metricsError instanceof Error ? metricsError.message : String(metricsError));
