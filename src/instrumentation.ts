@@ -98,8 +98,11 @@ export function initializeHttpMetrics() {
 async function initializeOpenTelemetryInternal() {
   const { log, warn, err } = require("./utils/logger.js");
   
+  console.log("DEBUG: initializeOpenTelemetryInternal called, INSTRUMENTATION_ENABLED:", INSTRUMENTATION_ENABLED);
+  
   if (INSTRUMENTATION_ENABLED) {
     try {
+      console.log("DEBUG: Starting OpenTelemetry SDK initialization...");
       log("Initializing OpenTelemetry SDK...");
       diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.INFO);
 
@@ -158,12 +161,16 @@ async function initializeOpenTelemetryInternal() {
         metricsEndpoint: config.openTelemetry.metricsEndpoint
       });
       
+      console.log("DEBUG: About to check for Prometheus metrics conflict...");
       log("DEBUG: Checking for potential Prometheus metrics conflict...");
       try {
         const promClient = require('prom-client');
         const existingRegistry = promClient.register;
-        log("DEBUG: Prometheus client found, checking existing metrics:", existingRegistry.getMetricsAsJSON().length);
+        const existingMetrics = existingRegistry.getMetricsAsJSON();
+        console.log("DEBUG: Prometheus client found, existing metrics count:", existingMetrics.length);
+        log("DEBUG: Prometheus client found, checking existing metrics:", existingMetrics.length);
       } catch (error) {
+        console.log("DEBUG: Prometheus client error:", error instanceof Error ? error.message : String(error));
         log("DEBUG: Prometheus client not found or error accessing:", error instanceof Error ? error.message : String(error));
       }
       
