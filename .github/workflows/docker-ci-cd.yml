@@ -1,0 +1,201 @@
+# .github/workflows/docker-ci-cd.yml
+
+name: Docker CI/CD with Bun and Snyk
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+  schedule:
+    - cron: "0 0 * * 0"
+
+env:
+  BUILDKIT_STEP_LOG_MAX_SIZE: 10000000
+  BUILDKIT_STEP_LOG_MAX_SPEED: 1000000
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+  BUILDX_NO_DEFAULT_LOAD: true
+  ACTIONS_CACHE_SIZE: 5GB
+  ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  ACTIONS_CACHE_DIR: /home/pi/.buildx-cache
+  ACTIONS_RUNTIME_DIR: /home/pi/.buildx-runtime
+  DOCKER_BUILDX_CACHE_DIR: /home/pi/.buildx-cache/docker
+  GITHUB_WORKSPACE_CACHE: /home/pi/actions-runner/_work/_cache
+  BUILDKIT_PROGRESS: plain
+  BUILDX_RETRY_ATTEMPTS: 3
+  BUILDX_RETRY_DELAY: 30s
+
+permissions:
+  contents: read
+  security-events: write
+  packages: write
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
+            image=moby/buildkit:buildx-stable-1
+          buildkitd-flags: |
+            --allow-insecure-entitlement security.insecure
+            --allow-insecure-entitlement network.host
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ matrix.platform }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-${{ matrix.platform }}-
+            ${{ runner.os }}-buildx-
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install Snyk CLI
+        run: |
+          curl -Lo ./snyk "https://github.com/snyk/cli/releases/latest/download/snyk-linux"
+          chmod +x ./snyk
+          sudo mv ./snyk /usr/local/bin/
+
+      - name: Authenticate Snyk
+        run: snyk auth ${{ secrets.SNYK_TOKEN }}
+        if: github.event_name != 'pull_request'
+
+      - name: Run Snyk to check for vulnerabilities
+        run: |
+          snyk test --severity-threshold=high --json > snyk-results.json || true
+          snyk code test --severity-threshold=high --json > snyk-code-results.json || true
+        continue-on-error: true
+
+      - name: Upload Snyk results to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: github.event_name != 'pull_request'
+        with:
+          sarif_file: snyk-results.sarif
+        continue-on-error: true
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: zx8086/synthetics-monitor-extractor
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{date 'YYYYMMDD'}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=synthetics-monitor-extractor
+            org.opencontainers.image.description=Synthetics Monitor Extractor Service
+            org.opencontainers.image.vendor=Siobytes
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          build-args: |
+            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            BUILD_VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+            COMMIT_HASH=${{ github.sha }}
+          sbom: true
+          provenance: true
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        if: github.event_name != 'pull_request'
+        with:
+          image: zx8086/synthetics-monitor-extractor:${{ github.sha }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: sbom-${{ matrix.platform }}
+          path: sbom.spdx.json
+
+      - name: Sign image with cosign
+        uses: sigstore/cosign-installer@v3
+        if: github.event_name != 'pull_request'
+
+      - name: Sign the published Docker image
+        if: github.event_name != 'pull_request'
+        env:
+          COSIGN_EXPERIMENTAL: 1
+        run: |
+          echo "${{ steps.meta.outputs.tags }}" | xargs -I {} cosign sign --yes {}@${{ steps.build.outputs.digest }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        if: github.event_name != 'pull_request'
+        with:
+          image-ref: zx8086/synthetics-monitor-extractor:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: github.event_name != 'pull_request'
+        with:
+          sarif_file: trivy-results.sarif
+
+  notify:
+    needs: build-and-deploy
+    runs-on: self-hosted
+    if: always()
+    steps:
+      - name: Notify on success
+        if: needs.build-and-deploy.result == 'success'
+        run: |
+          echo "✅ Docker build and deployment completed successfully"
+          
+      - name: Notify on failure
+        if: needs.build-and-deploy.result == 'failure'
+        run: |
+          echo "❌ Docker build and deployment failed"
+          exit 1
