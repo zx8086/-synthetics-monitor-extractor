@@ -19,6 +19,9 @@ export class MonitoredOTLPLogExporter extends MonitoredOTLPExporter<ReadableLogR
     this.otlpExporter = new OTLPLogExporter({
       ...exporterConfig,
       timeoutMillis: timeoutMillis,
+      httpAgentOptions: {
+        timeout: timeoutMillis,
+      },
     });
   }
 
@@ -30,17 +33,46 @@ export class MonitoredOTLPLogExporter extends MonitoredOTLPExporter<ReadableLogR
     this.totalExports++;
 
     try {
+      console.log(`DEBUG: *** LOG EXPORT CALLED *** #${this.totalExports} to ${this.url}`);
+      console.log(`DEBUG: Export called at: ${new Date(startTime).toISOString()}`);
+      console.log(`DEBUG: Configured timeout: ${this.timeoutMillis}ms`);
+      console.log(`DEBUG: Number of logs: ${logs.length}`);
+      
+      log(`DEBUG: LOG EXPORT ATTEMPT #${this.totalExports} to ${this.url}`);
+      log(`DEBUG: Configured timeout: ${this.timeoutMillis}ms`);
+      log(`DEBUG: Export start time: ${new Date(startTime).toISOString()}`);
+      log(`DEBUG: Number of logs: ${logs.length}`);
+      
       await this.checkNetworkConnectivity();
       this.logSystemResources();
 
-      this.otlpExporter.export(logs, (result) => {
+      let timeoutFired = false;
+      const exportTimeout = setTimeout(() => {
+        timeoutFired = true;
         const duration = Date.now() - startTime;
+        const timeoutError = new Error(`Log export timeout after ${this.timeoutMillis}ms`);
+        this.logDetailedFailure(timeoutError, logs.length, duration);
+        log(`DEBUG: Log export TIMEOUT in ${duration}ms`);
+        resultCallback({ code: 1, error: timeoutError });
+      }, this.timeoutMillis);
+
+      this.otlpExporter.export(logs, (result) => {
+        if (timeoutFired) {
+          log(`DEBUG: OTLP log exporter callback received after timeout - ignoring`);
+          return;
+        }
+        
+        clearTimeout(exportTimeout);
+        const duration = Date.now() - startTime;
+        log(`DEBUG: OTLP log exporter callback received after ${duration}ms`);
         
         if (result.code === 0) {
           this.successfulExports++;
           this.logSuccess(logs.length, duration);
+          log(`DEBUG: Log export SUCCESS in ${duration}ms`);
         } else {
           this.logDetailedFailure(result.error, logs.length, duration);
+          log(`DEBUG: Log export FAILED in ${duration}ms - Error:`, result.error?.message || result.error);
         }
         
         this.logExportDuration(startTime);
@@ -49,6 +81,7 @@ export class MonitoredOTLPLogExporter extends MonitoredOTLPExporter<ReadableLogR
     } catch (error) {
       const duration = Date.now() - startTime;
       this.logDetailedFailure(error, logs.length, duration);
+      log(`DEBUG: Log export EXCEPTION in ${duration}ms - Error:`, error instanceof Error ? error.message : error);
       resultCallback({ code: 1, error: error instanceof Error ? error : new Error(String(error)) });
     }
   }

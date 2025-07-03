@@ -105,7 +105,7 @@ async function initializeOpenTelemetryInternal() {
 
       const resource = await createResource();
 
-      log("Creating trace exporter with endpoint:", config.openTelemetry.tracesEndpoint);
+      log("DEBUG: Creating trace exporter with endpoint:", config.openTelemetry.tracesEndpoint, "timeout:", exporterTimeout);
       const traceExporter = new MonitoredOTLPTraceExporter(
         {
           url: config.openTelemetry.tracesEndpoint,
@@ -114,11 +114,11 @@ async function initializeOpenTelemetryInternal() {
         },
         exporterTimeout,
       ) as unknown as SpanExporter;
-      log("Trace exporter created successfully");
+      log("DEBUG: Trace exporter created successfully");
 
       log("Skipping OTLP metric exporter creation - using existing Prometheus metrics");
 
-      log("Creating log exporter with endpoint:", config.openTelemetry.logsEndpoint);
+      log("DEBUG: Creating log exporter with endpoint:", config.openTelemetry.logsEndpoint, "timeout:", exporterTimeout);
       const logExporter = new MonitoredOTLPLogExporter(
         {
           url: config.openTelemetry.logsEndpoint,
@@ -127,7 +127,7 @@ async function initializeOpenTelemetryInternal() {
         },
         exporterTimeout,
       ) as unknown as LogRecordExporter;
-      log("Log exporter created successfully");
+      log("DEBUG: Log exporter created successfully");
 
       log("All OTLP exporters created with 10s timeout configuration");
 

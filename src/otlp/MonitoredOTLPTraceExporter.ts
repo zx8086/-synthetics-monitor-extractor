@@ -16,10 +16,18 @@ export class MonitoredOTLPTraceExporter extends MonitoredOTLPExporter<ReadableSp
     timeoutMillis: number = 10000,
   ) {
     super(exporterConfig, exporterConfig.url || "", timeoutMillis);
+    console.log(`DEBUG: MonitoredOTLPTraceExporter constructor - timeout: ${timeoutMillis}ms, url: ${exporterConfig.url}`);
+    console.log(`DEBUG: Full exporter config:`, { ...exporterConfig, timeoutMillis });
+    
     this.otlpExporter = new OTLPTraceExporter({
       ...exporterConfig,
       timeoutMillis: timeoutMillis,
+      httpAgentOptions: {
+        timeout: timeoutMillis,
+        keepAlive: false, // Disable keep-alive to avoid connection reuse issues
+      },
     });
+    console.log(`DEBUG: OTLPTraceExporter created with timeout: ${timeoutMillis}ms`);
   }
 
   async export(
@@ -30,17 +38,46 @@ export class MonitoredOTLPTraceExporter extends MonitoredOTLPExporter<ReadableSp
     this.totalExports++;
 
     try {
+      console.log(`DEBUG: *** TRACE EXPORT CALLED *** #${this.totalExports} to ${this.url}`);
+      console.log(`DEBUG: Export called at: ${new Date(startTime).toISOString()}`);
+      console.log(`DEBUG: Configured timeout: ${this.timeoutMillis}ms`);
+      console.log(`DEBUG: Number of spans: ${spans.length}`);
+      
+      log(`DEBUG: TRACE EXPORT ATTEMPT #${this.totalExports} to ${this.url}`);
+      log(`DEBUG: Configured timeout: ${this.timeoutMillis}ms`);
+      log(`DEBUG: Export start time: ${new Date(startTime).toISOString()}`);
+      log(`DEBUG: Number of spans: ${spans.length}`);
+      
       await this.checkNetworkConnectivity();
       this.logSystemResources();
 
-      this.otlpExporter.export(spans, (result) => {
+      let timeoutFired = false;
+      const exportTimeout = setTimeout(() => {
+        timeoutFired = true;
         const duration = Date.now() - startTime;
+        const timeoutError = new Error(`Trace export timeout after ${this.timeoutMillis}ms`);
+        this.logDetailedFailure(timeoutError, spans.length, duration);
+        log(`DEBUG: Trace export TIMEOUT in ${duration}ms`);
+        resultCallback({ code: 1, error: timeoutError });
+      }, this.timeoutMillis);
+
+      this.otlpExporter.export(spans, (result) => {
+        if (timeoutFired) {
+          log(`DEBUG: OTLP trace exporter callback received after timeout - ignoring`);
+          return;
+        }
+        
+        clearTimeout(exportTimeout);
+        const duration = Date.now() - startTime;
+        log(`DEBUG: OTLP trace exporter callback received after ${duration}ms`);
         
         if (result.code === 0) {
           this.successfulExports++;
           this.logSuccess(spans.length, duration);
+          log(`DEBUG: Trace export SUCCESS in ${duration}ms`);
         } else {
           this.logDetailedFailure(result.error, spans.length, duration);
+          log(`DEBUG: Trace export FAILED in ${duration}ms - Error:`, result.error?.message || result.error);
         }
         
         this.logExportDuration(startTime);
@@ -49,6 +86,7 @@ export class MonitoredOTLPTraceExporter extends MonitoredOTLPExporter<ReadableSp
     } catch (error) {
       const duration = Date.now() - startTime;
       this.logDetailedFailure(error, spans.length, duration);
+      log(`DEBUG: Trace export EXCEPTION in ${duration}ms - Error:`, error instanceof Error ? error.message : error);
       resultCallback({ code: 1, error: error instanceof Error ? error : new Error(String(error)) });
     }
   }
