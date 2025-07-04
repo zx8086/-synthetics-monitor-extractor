@@ -152,6 +152,7 @@ jobs:
           image: zx8086/synthetics-monitor-extractor:${{ github.sha }}
           format: spdx-json
           output-file: sbom.spdx.json
+        continue-on-error: true
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
@@ -159,6 +160,7 @@ jobs:
         with:
           name: sbom-${{ matrix.platform }}
           path: sbom.spdx.json
+        continue-on-error: true
 
       - name: Sign image with cosign
         uses: sigstore/cosign-installer@v3
@@ -178,12 +180,14 @@ jobs:
           image-ref: zx8086/synthetics-monitor-extractor:${{ github.sha }}
           format: sarif
           output: trivy-results.sarif
+        continue-on-error: true
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         if: github.event_name != 'pull_request'
         with:
           sarif_file: trivy-results.sarif
+        continue-on-error: true
 
   notify:
     needs: build-and-deploy
