@@ -76,29 +76,77 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-bun-
 
-      - name: Install Snyk CLI
-        run: |
-          curl -Lo ./snyk "https://github.com/snyk/cli/releases/latest/download/snyk-linux"
-          chmod +x ./snyk
-          sudo mv ./snyk /usr/local/bin/
+      # No need for file preparation as the GitHub Action creates all necessary files
 
-      - name: Authenticate Snyk
-        run: snyk auth ${{ secrets.SNYK_TOKEN }}
+      - name: Snyk vulnerability scan (GitHub Action)
+        uses: snyk/actions/node@master
+        with:
+          args: --severity-threshold=high --sarif-file-output=snyk-results.sarif --json-file-output=snyk-results.json
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+      - name: Snyk code scan (GitHub Action)
+        uses: snyk/actions/node@master
+        with:
+          args: code test --severity-threshold=high --sarif-file-output=snyk-code-results.sarif --json-file-output=snyk-code-results.json
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+      - name: Snyk container scan (optional)
         if: github.event_name != 'pull_request'
+        uses: snyk/actions/docker@master
+        with:
+          image: zx8086/synthetics-monitor-extractor:latest
+          args: --file=Dockerfile --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         continue-on-error: true
 
-      - name: Run Snyk to check for vulnerabilities
-        run: |
-          snyk test --severity-threshold=high --json > snyk-results.json || true
-          snyk code test --severity-threshold=high --json > snyk-code-results.json || true
-        continue-on-error: true
-
-      - name: Upload Snyk results to GitHub Code Scanning
+      - name: Upload Snyk vulnerability results to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && hashFiles('snyk-code-results.sarif') != ''
         with:
           sarif_file: snyk-results.sarif
+          category: snyk-vulnerability
         continue-on-error: true
+
+      - name: Upload Snyk code results to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: github.event_name != 'pull_request' && hashFiles('snyk-results.sarif') != ''
+        with:
+          sarif_file: snyk-code-results.sarif
+          category: snyk-code
+        continue-on-error: true
+
+      # Add summary of Snyk scanning status
+      - name: Snyk scan summary
+        run: |
+          echo "## Snyk Security Scanning Summary" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Environment Information" >> $GITHUB_STEP_SUMMARY
+          echo "- Architecture: $(uname -m)" >> $GITHUB_STEP_SUMMARY
+          echo "- Snyk Method: GitHub Action" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Scan Results" >> $GITHUB_STEP_SUMMARY
+          if [ -s "snyk-results.sarif" ]; then
+            echo "✅ Vulnerability scanning completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Vulnerability scanning may have encountered issues" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -s "snyk-code-results.sarif" ]; then
+            echo "✅ Code scanning completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Code scanning may have encountered issues" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "View results in the Security tab of this repository" >> $GITHUB_STEP_SUMMARY
+        continue-on-error: true
+
+      # Removed fallback SARIF generation as the GitHub Action handles this reliably
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -199,7 +247,7 @@ jobs:
         if: needs.build-and-deploy.result == 'success'
         run: |
           echo "✅ Docker build and deployment completed successfully"
-          
+
       - name: Notify on failure
         if: needs.build-and-deploy.result == 'failure'
         run: |
