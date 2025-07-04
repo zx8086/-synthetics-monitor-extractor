@@ -16,7 +16,7 @@
     "security:code": "snyk code test --severity-threshold=high",
     "security:code:json": "snyk code test --severity-threshold=high --json > snyk-code-results.json || true",
     "security:code:sarif": "snyk code test --severity-threshold=high --sarif-file-output=snyk-code-results.sarif || true",
-    "security:full": "npm run security:scan && npm run security:code && npm run security:scan:sarif && npm run security:code:sarif",
+    "security:full": "bun run security:scan && bun run security:code && bun run security:scan:sarif && bun run security:code:sarif",
     "lint": "biome check ./src",
     "format": "biome format --write ./src",
     "health": "curl -f http://localhost:3001/metrics || exit 1"
