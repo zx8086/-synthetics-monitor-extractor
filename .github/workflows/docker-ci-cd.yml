@@ -229,7 +229,6 @@ jobs:
             COMMIT_HASH=${{ github.sha }}
           sbom: true
           provenance: true
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
 
       - name: Move cache
         run: |
