@@ -239,8 +239,8 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           echo "Waiting for image to be available in registry..."
-          # Get the first tag from metadata
-          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d' ' -f1 | sed 's/.*://')
+          # Get the first tag from metadata (tags are newline-separated)
+          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1 | sed 's/.*://')
           echo "Using image tag: ${IMAGE_TAG}"
           # Wait for the image to be pushed and available
           for i in {1..30}; do
@@ -329,17 +329,18 @@ jobs:
           docker rm -f synthetics-monitor-test 2>/dev/null || true
           
           # Run container (will automatically use correct architecture)
-          # Use the first tag from metadata output
-          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d' ' -f1 | sed 's/.*://')
+          # Use the first tag from metadata output (tags are newline-separated)
+          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
+          echo "Using image: ${IMAGE_TAG}"
           docker run -d \
             --name synthetics-monitor-test \
-            -p 3000:3000 \
+            -p 3001:3001 \
             -e NODE_ENV=production \
             -e BUILD_VERSION=${{ github.ref_name || '0.0.1' }} \
             -e COMMIT_HASH=${{ github.sha }} \
             -e BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             -e LOG_LEVEL=info \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+            "${IMAGE_TAG}"
           
           # Add delay and better error handling
           sleep 15
@@ -351,15 +352,15 @@ jobs:
 
           # Test health endpoint
           echo "Testing health endpoint..."
-          curl -f http://localhost:3000/health || echo "Health endpoint test failed"
+          curl -f http://localhost:3001/health || echo "Health endpoint test failed"
           
           # Test metrics endpoint
           echo "Testing metrics endpoint..."
-          curl -f http://localhost:3000/metrics || echo "Metrics endpoint test failed"
+          curl -f http://localhost:3001/metrics || echo "Metrics endpoint test failed"
           
           # Test API endpoints
           echo "Testing API endpoints..."
-          curl -f http://localhost:3000/api/invalid-records || echo "API endpoint test failed"
+          curl -f http://localhost:3001/api/invalid-records || echo "API endpoint test failed"
           
           # Capture metrics
           CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' synthetics-monitor-test)
@@ -377,10 +378,10 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           echo "Running Snyk container scan..."
-          # Get the first tag from metadata
-          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d' ' -f1)
-          echo "Scanning image: ${IMAGE_TAG}"
-          snyk container test ${IMAGE_TAG} \
+          # Get the first full tag from metadata (tags are newline-separated)
+          FULL_IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
+          echo "Scanning image: ${FULL_IMAGE_TAG}"
+          snyk container test "${FULL_IMAGE_TAG}" \
             --file=Dockerfile \
             --severity-threshold=high \
             --sarif-file-output=snyk-container.sarif \
@@ -388,7 +389,7 @@ jobs:
             
           # Monitor on master branch
           if [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
-            snyk container monitor ${IMAGE_TAG} \
+            snyk container monitor "${FULL_IMAGE_TAG}" \
               --file=Dockerfile || echo "Container monitor command failed but continuing..."
           fi
         continue-on-error: true
@@ -409,14 +410,14 @@ jobs:
           
           # Generate multiple SBOM formats
           echo "Generating SBOM files..."
-          # Get the first tag from metadata
-          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d' ' -f1)
+          # Get the first tag from metadata (tags are newline-separated)
+          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
           echo "Scanning image: ${IMAGE_TAG}"
           
           # Try to pull the image first to ensure it's available
-          if docker pull ${IMAGE_TAG}; then
+          if docker pull "${IMAGE_TAG}"; then
             echo "Image pulled successfully, generating SBOM..."
-            "${GITHUB_WORKSPACE}/bin/syft" ${IMAGE_TAG} \
+            "${GITHUB_WORKSPACE}/bin/syft" "${IMAGE_TAG}" \
               -o json=sbom-output/syft-sbom.json \
               -o spdx-json=sbom-output/spdx-sbom.json \
               -o cyclonedx-json=sbom-output/cyclonedx-sbom.json || echo "SBOM generation failed but continuing..."
@@ -450,8 +451,8 @@ jobs:
           
           # Get image digest and reference
           echo "Getting image digest..."
-          # Get the first tag from metadata
-          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d' ' -f1)
+          # Get the first tag from metadata (tags are newline-separated)
+          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
           IMAGE_REF="${IMAGE_TAG}"
           IMAGE_DIGEST=$(docker buildx imagetools inspect "${IMAGE_REF}" --raw | jq -r '.manifests[0].digest' 2>/dev/null || echo "unknown")
           
