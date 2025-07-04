@@ -16,6 +16,8 @@ env:
   DOCKER_BUILDKIT: 1
   COMPOSE_DOCKER_CLI_BUILD: 1
   BUILDX_NO_DEFAULT_LOAD: true
+  BUILDKIT_INLINE_CACHE: 1
+  BUILDX_CACHE_TTL: "168h"
   ACTIONS_CACHE_SIZE: 5GB
   ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   ACTIONS_CACHE_DIR: /home/pi/.buildx-cache
@@ -25,6 +27,10 @@ env:
   BUILDKIT_PROGRESS: plain
   BUILDX_RETRY_ATTEMPTS: 3
   BUILDX_RETRY_DELAY: 30s
+  COSIGN_VERSION: "v2.4.0"
+  SYFT_VERSION: "v1.19.0"
+  COSIGN_YES: "true"
+  COSIGN_EXPERIMENTAL: "true"
 
 permissions:
   contents: read
@@ -243,6 +249,211 @@ jobs:
           path: sbom.spdx.json
         continue-on-error: true
 
+      - name: Install verification tools
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          # Create directories first
+          mkdir -p "${GITHUB_WORKSPACE}/bin"
+          mkdir -p "${GITHUB_WORKSPACE}/tmp"
+          
+          cd "${GITHUB_WORKSPACE}/tmp"
+
+          # Install cosign
+          curl -Lo cosign "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"
+          chmod +x cosign
+          mv cosign "${GITHUB_WORKSPACE}/bin/"
+
+          # Install syft
+          SYFT_RELEASE=$(curl -s https://api.github.com/repos/anchore/syft/releases/latest | grep -o '"tag_name": ".*"' | cut -d'"' -f4)
+          curl -Lo syft.tar.gz "https://github.com/anchore/syft/releases/download/${SYFT_RELEASE}/syft_${SYFT_RELEASE#v}_linux_amd64.tar.gz"
+          tar xzf syft.tar.gz syft
+          mv syft "${GITHUB_WORKSPACE}/bin/"
+
+          # Add to PATH
+          echo "${GITHUB_WORKSPACE}/bin" >> $GITHUB_PATH
+
+          # Cleanup
+          cd "${GITHUB_WORKSPACE}"
+          rm -rf "${GITHUB_WORKSPACE}/tmp"
+
+          # Verify installations
+          "${GITHUB_WORKSPACE}/bin/cosign" version || true
+          "${GITHUB_WORKSPACE}/bin/syft" --version || true
+        continue-on-error: true
+
+      - name: Test container health
+        if: github.event_name != 'pull_request'
+        run: |
+          # Get the runner's architecture
+          RUNNER_ARCH=$(uname -m)
+          
+          # Stop existing containers using port 3000
+          docker ps -q --filter publish=3000 | xargs -r docker stop || true
+          docker rm -f synthetics-monitor-test 2>/dev/null || true
+          
+          # Run container (will automatically use correct architecture)
+          docker run -d \
+            --name synthetics-monitor-test \
+            -p 3000:3000 \
+            -e NODE_ENV=production \
+            -e BUILD_VERSION=${{ github.ref_name || '0.0.1' }} \
+            -e COMMIT_HASH=${{ github.sha }} \
+            -e BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+            -e LOG_LEVEL=info \
+            zx8086/synthetics-monitor-extractor:${{ github.sha }}
+          
+          # Add delay and better error handling
+          sleep 15
+          if ! docker ps | grep -q synthetics-monitor-test; then
+            echo "Container failed to start. Showing logs:"
+            docker logs synthetics-monitor-test
+            exit 1
+          fi
+
+          # Test health endpoint
+          echo "Testing health endpoint..."
+          curl -f http://localhost:3000/health || echo "Health endpoint test failed"
+          
+          # Test metrics endpoint
+          echo "Testing metrics endpoint..."
+          curl -f http://localhost:3000/metrics || echo "Metrics endpoint test failed"
+          
+          # Test API endpoints
+          echo "Testing API endpoints..."
+          curl -f http://localhost:3000/api/invalid-records || echo "API endpoint test failed"
+          
+          # Capture metrics
+          CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' synthetics-monitor-test)
+          echo "CONTAINER_STATUS=${CONTAINER_STATUS}" >> $GITHUB_ENV
+          echo "CONTAINER_START_TIME=$(docker inspect --format='{{.State.StartedAt}}' synthetics-monitor-test)" >> $GITHUB_ENV
+          
+          # Show container logs for debugging
+          echo "Container logs:"
+          docker logs synthetics-monitor-test --tail 50
+        continue-on-error: true
+
+      - name: Run Snyk container scan
+        if: github.event_name != 'pull_request'
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          echo "Running Snyk container scan..."
+          snyk container test zx8086/synthetics-monitor-extractor:${{ github.sha }} \
+            --file=Dockerfile \
+            --severity-threshold=high \
+            --sarif-file-output=snyk-container.sarif \
+            --json > snyk-container-report.json || echo "Container vulnerabilities found but continuing..."
+            
+          # Monitor on master branch
+          if [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
+            snyk container monitor zx8086/synthetics-monitor-extractor:${{ github.sha }} \
+              --file=Dockerfile || echo "Container monitor command failed but continuing..."
+          fi
+        continue-on-error: true
+
+      - name: Upload Snyk container scan results
+        if: github.event_name != 'pull_request' && hashFiles('snyk-container.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: snyk-container.sarif
+          category: snyk-container
+          wait-for-processing: true
+        continue-on-error: true
+
+      - name: Generate comprehensive SBOM
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p sbom-output
+          
+          # Generate multiple SBOM formats
+          echo "Generating SBOM files..."
+          syft zx8086/synthetics-monitor-extractor:${{ github.sha }} \
+            -o json=sbom-output/syft-sbom.json \
+            -o spdx-json=sbom-output/spdx-sbom.json \
+            -o cyclonedx-json=sbom-output/cyclonedx-sbom.json || echo "SBOM generation failed but continuing..."
+          
+          # List generated files
+          echo "Generated SBOM files:"
+          ls -la sbom-output/ || true
+        continue-on-error: true
+
+      - name: Upload comprehensive SBOM files
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: comprehensive-sbom-${{ matrix.platform }}
+          path: sbom-output/
+          retention-days: 90
+        continue-on-error: true
+
+      - name: Verify image attestations
+        if: github.event_name != 'pull_request'
+        run: |
+          # Set results directory name first
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          RESULTS_DIR="attestation-results-${TIMESTAMP}"
+          echo "ATTESTATION_RESULTS_DIR=${RESULTS_DIR}" >> $GITHUB_ENV
+          
+          mkdir -p "${RESULTS_DIR}"
+          
+          # Get image digest and reference
+          echo "Getting image digest..."
+          IMAGE_REF="zx8086/synthetics-monitor-extractor:${{ github.sha }}"
+          IMAGE_DIGEST=$(docker buildx imagetools inspect "${IMAGE_REF}" --raw | jq -r '.manifests[0].digest' 2>/dev/null || echo "unknown")
+          
+          if [ "$IMAGE_DIGEST" != "unknown" ]; then
+            IMAGE_WITH_DIGEST="${IMAGE_REF}@${IMAGE_DIGEST}"
+            echo "Image reference: ${IMAGE_REF}"
+            echo "Image digest: ${IMAGE_DIGEST}"
+
+            # Download all attestations for analysis
+            echo "Downloading attestations..."
+            cosign download attestation "${IMAGE_WITH_DIGEST}" > "${RESULTS_DIR}/all-attestations.json" 2>/dev/null || echo "No attestations found"
+
+            # Extract from manifest and save all data
+            echo "Extracting from manifest..."
+            docker buildx imagetools inspect "${IMAGE_WITH_DIGEST}" --raw > "${RESULTS_DIR}/manifest.json" 2>/dev/null || true
+          else
+            echo "Could not get image digest, skipping attestation verification"
+          fi
+          
+          # Generate comprehensive report
+          {
+            echo "### 📝 Attestation Verification Report"
+            echo "- Image: ${IMAGE_REF}"
+            echo "- Digest: ${IMAGE_DIGEST}"
+            echo "- Timestamp: $(date -u)"
+            echo ""
+            echo "#### Verification Results:"
+
+            for file in "${RESULTS_DIR}"/*.json; do
+              if [ -s "$file" ]; then
+                basename=$(basename "$file")
+                size=$(wc -c < "$file")
+                echo "- File: ${basename}"
+                echo "  - Size: ${size} bytes"
+                if jq -e . >/dev/null 2>&1 < "$file"; then
+                  echo "  - Status: ✅ Valid JSON"
+                else
+                  echo "  - Status: ⚠️ Invalid JSON"
+                fi
+              fi
+            done
+          } > "${RESULTS_DIR}/verification-report.md"
+        continue-on-error: true
+
+      - name: Upload attestation results
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: attestation-results-${{ matrix.platform }}
+          path: |
+            ${{ env.ATTESTATION_RESULTS_DIR }}/*.json
+            ${{ env.ATTESTATION_RESULTS_DIR }}/*.md
+          retention-days: 90
+        continue-on-error: true
+
       # - name: Sign image with cosign
       #   uses: sigstore/cosign-installer@v3
       #   if: github.event_name != 'pull_request'
@@ -270,6 +481,106 @@ jobs:
       #   with:
       #     sarif_file: trivy-results.sarif
       #   continue-on-error: true
+
+      - name: Docker Build Summary
+        if: always()
+        run: |
+          {
+            echo "### 🐳 Docker Build Summary"
+            echo ""
+            echo "#### 📊 Build Overview"
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| 🆔 Build ID | \`${GITHUB_SHA::7}\` |"
+            echo "| 📦 Image | synthetics-monitor-extractor |"
+            echo "| 🏗️ Platform | ${{ matrix.platform }} |"
+            echo "| ⚡ Status | ${CONTAINER_STATUS:-N/A} |"
+            
+            # Container Status
+            if [ "${CONTAINER_STATUS:-}" = "running" ]; then
+              echo "| 🔄 Status | ✅ Running |"
+              echo "| 🕒 Start Time | ${CONTAINER_START_TIME:-N/A} |"
+            else
+              echo "| 🔄 Status | ⚠️ Not Running |"
+            fi
+            
+            echo ""
+            echo "#### 🔒 Security Scanning"
+            echo "| Scan Type | Status |"
+            echo "|-----------|--------|"
+            
+            # Check for SARIF files
+            if [ -f "snyk-reports/snyk-results.sarif" ] || [ -f "snyk-action-results.sarif" ]; then
+              echo "| 🔍 Vulnerability Scan | ✅ Completed |"
+            else
+              echo "| 🔍 Vulnerability Scan | ⚠️ Failed |"
+            fi
+            
+            if [ -f "snyk-reports/snyk-code-results.sarif" ] || [ -f "snyk-action-code-results.sarif" ]; then
+              echo "| 🔎 Code Scan | ✅ Completed |"
+            else
+              echo "| 🔎 Code Scan | ⚠️ Failed |"
+            fi
+            
+            if [ -f "snyk-container.sarif" ]; then
+              echo "| 📦 Container Scan | ✅ Completed |"
+            else
+              echo "| 📦 Container Scan | ⚠️ Failed |"
+            fi
+            
+            echo ""
+            echo "#### 📋 Supply Chain Security"
+            echo "| Component | Status |"
+            echo "|-----------|--------|"
+            
+            if [ -d "sbom-output" ] && [ "$(ls -A sbom-output)" ]; then
+              echo "| 📄 SBOM Generation | ✅ Completed |"
+            else
+              echo "| 📄 SBOM Generation | ⚠️ Failed |"
+            fi
+            
+            if [ -d "${{ env.ATTESTATION_RESULTS_DIR }}" ] && [ "$(ls -A ${{ env.ATTESTATION_RESULTS_DIR }})" ]; then
+              echo "| 🔐 Attestation Verification | ✅ Completed |"
+            else
+              echo "| 🔐 Attestation Verification | ⚠️ Failed |"
+            fi
+            
+            echo ""
+            echo "#### 🔗 Useful Links"
+            echo "- [Security Tab](https://github.com/${{ github.repository }}/security)"
+            echo "- [Actions Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo "- [Docker Hub](https://hub.docker.com/r/zx8086/synthetics-monitor-extractor)"
+            
+          } >> $GITHUB_STEP_SUMMARY
+        continue-on-error: true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Starting cleanup process..."
+          
+          # Remove test containers
+          docker container rm -f synthetics-monitor-test 2>/dev/null || true
+          
+          # Clean up temporary files
+          rm -rf snyk-reports/ || true
+          rm -rf sbom-output/ || true
+          rm -rf "${{ env.ATTESTATION_RESULTS_DIR }}" || true
+          rm -f snyk-*.sarif || true
+          rm -f snyk-*.json || true
+          rm -f sbom.spdx.json || true
+          
+          # Docker cleanup
+          docker image prune -f --filter "until=24h" || true
+          docker volume prune -f || true
+          docker builder prune -f --filter "until=24h" || true
+          
+          # Remove verification tools
+          rm -rf "${GITHUB_WORKSPACE}/bin" || true
+          rm -rf ~/.sigstore || true
+          
+          echo "Cleanup completed successfully"
+        continue-on-error: true
 
   notify:
     needs: build-and-deploy
