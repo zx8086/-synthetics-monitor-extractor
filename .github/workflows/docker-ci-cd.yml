@@ -85,6 +85,7 @@ jobs:
       - name: Authenticate Snyk
         run: snyk auth ${{ secrets.SNYK_TOKEN }}
         if: github.event_name != 'pull_request'
+        continue-on-error: true
 
       - name: Run Snyk to check for vulnerabilities
         run: |
