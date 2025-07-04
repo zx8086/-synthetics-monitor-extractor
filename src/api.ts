@@ -2,6 +2,7 @@
 
 import type { Server } from "bun";
 import { join } from "node:path";
+import { trace, context, SpanStatusCode, SpanKind } from "@opentelemetry/api";
 import { config } from "./config.js";
 import { registry } from "./metrics.js";
 import {
@@ -13,6 +14,9 @@ import {
 } from "./database.js";
 import { recordHttpRequest, recordHttpResponseTime } from "./instrumentation.js";
 import { log, err } from "./utils/logger.js";
+
+// Create a tracer for the API server
+const tracer = trace.getTracer('api-server', '1.0.0');
 
 // Simple in-memory rate limiter
 class RateLimiter {
@@ -166,6 +170,48 @@ function checkRateLimit(req: Request, startTime: number): Response | null {
   return null;
 }
 
+// Helper function to execute request handler within a span context
+async function executeWithSpan<T>(
+  spanName: string,
+  attributes: Record<string, any>,
+  fn: () => Promise<T>
+): Promise<T> {
+  // Check if OpenTelemetry is enabled
+  if (!config.openTelemetry.enabled) {
+    // If disabled, just execute the function without instrumentation
+    return fn();
+  }
+
+  const span = tracer.startSpan(spanName, {
+    kind: SpanKind.SERVER,
+    attributes
+  });
+
+  // Log span creation in debug mode
+  log(`Created span: ${spanName} with ID: ${span.spanContext().spanId}`);
+
+  return context.with(trace.setSpan(context.active(), span), async () => {
+    try {
+      const result = await fn();
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (error) {
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: error instanceof Error ? error.message : String(error)
+      });
+      if (error instanceof Error) {
+        span.recordException(error);
+      }
+      throw error;
+    } finally {
+      // Log span completion
+      log(`Ending span: ${spanName} with ID: ${span.spanContext().spanId}`);
+      span.end();
+    }
+  });
+}
+
 export function startApiServer(port: number = config.metrics.port): Server {
   const server = Bun.serve({
     port,
@@ -178,68 +224,134 @@ export function startApiServer(port: number = config.metrics.port): Server {
       // Record incoming request
       recordHttpRequest(method, route);
 
-      // Enable CORS
-      const headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Content-Type": "application/json",
+      // Create initial span attributes
+      const spanAttributes = {
+        'http.method': method,
+        'http.scheme': url.protocol.replace(':', ''),
+        'http.host': url.host,
+        'http.target': url.pathname + url.search,
+        'http.url': req.url,
+        'http.route': route,
+        'net.peer.ip': req.headers.get('x-forwarded-for') || 'unknown',
+        'http.user_agent': req.headers.get('user-agent') || 'unknown'
       };
 
-      // Handle preflight requests
-      if (req.method === "OPTIONS") {
-        const response = new Response(null, { headers });
-        recordHttpResponseTime(performance.now() - startTime, route, 200);
-        return response;
-      }
+      // Execute the entire request within a span
+      return executeWithSpan(
+        `${method} ${route}`,
+        spanAttributes,
+        async () => {
+          // Enable CORS
+          const headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Content-Type": "application/json",
+          };
 
-      // Prometheus metrics endpoint
-      if (url.pathname === config.metrics.endpoint) {
-        try {
-          const metrics = await registry.metrics();
-          const response = new Response(metrics, {
-            headers: { "Content-Type": registry.contentType },
-          });
-          recordHttpResponseTime(performance.now() - startTime, route, 200);
-          return response;
-        } catch (error) {
-          err("Error generating metrics:", error);
-          const response = new Response("Internal Server Error", { status: 500 });
-          recordHttpResponseTime(performance.now() - startTime, route, 500);
-          return response;
-        }
-      }
+          // Handle preflight requests
+          if (req.method === "OPTIONS") {
+            const response = new Response(null, { headers });
+            recordHttpResponseTime(performance.now() - startTime, route, 200);
+            // Add response attributes to current span
+            const span = trace.getActiveSpan();
+            if (span) {
+              span.setAttributes({
+                'http.status_code': 200,
+                'http.response_content_length': 0
+              });
+            }
+            return response;
+          }
 
-      // Handle DELETE requests for the delete endpoint
-      if (
-        req.method === "DELETE" &&
-        url.pathname.startsWith(`${config.api.invalidRecordsEndpoint}/delete/`)
-      ) {
-        const idStr = url.pathname.split("/").pop();
-        const id = parseInt(idStr || "", 10);
+          // Prometheus metrics endpoint
+          if (url.pathname === config.metrics.endpoint) {
+            try {
+              const metrics = await registry.metrics();
+              const response = new Response(metrics, {
+                headers: { "Content-Type": registry.contentType },
+              });
+              recordHttpResponseTime(performance.now() - startTime, route, 200);
+              // Add response attributes to current span
+              const span = trace.getActiveSpan();
+              if (span) {
+                span.setAttributes({
+                  'http.status_code': 200,
+                  'http.response_content_length': metrics.length,
+                  'http.response_content_type': registry.contentType
+                });
+              }
+              return response;
+            } catch (error) {
+              err("Error generating metrics:", error);
+              const response = new Response("Internal Server Error", { status: 500 });
+              recordHttpResponseTime(performance.now() - startTime, route, 500);
+              // Add error attributes to current span
+              const span = trace.getActiveSpan();
+              if (span) {
+                span.setAttributes({
+                  'http.status_code': 500,
+                  'error.type': error instanceof Error ? error.constructor.name : 'Error',
+                  'error.message': error instanceof Error ? error.message : String(error)
+                });
+              }
+              return response;
+            }
+          }
 
-        if (Number.isNaN(id)) {
-          const response = Response.json({ error: "Invalid record ID" }, { status: 400, headers });
-          recordHttpResponseTime(performance.now() - startTime, route, 400);
-          return response;
-        }
+          // Handle DELETE requests for the delete endpoint
+          if (
+            req.method === "DELETE" &&
+            url.pathname.startsWith(`${config.api.invalidRecordsEndpoint}/delete/`)
+          ) {
+            const idStr = url.pathname.split("/").pop();
+            const id = parseInt(idStr || "", 10);
 
-        const success = deleteInvalidRecord(id);
-        const response = Response.json({ success }, { headers });
-        recordHttpResponseTime(performance.now() - startTime, route, 200);
-        return response;
-      }
+            if (Number.isNaN(id)) {
+              const response = Response.json({ error: "Invalid record ID" }, { status: 400, headers });
+              recordHttpResponseTime(performance.now() - startTime, route, 400);
+              const span = trace.getActiveSpan();
+              if (span) {
+                span.setAttributes({
+                  'http.status_code': 400,
+                  'error.type': 'ValidationError',
+                  'error.message': 'Invalid record ID'
+                });
+              }
+              return response;
+            }
 
-      // Only accept GET requests for API endpoints (except the delete endpoint)
-      if (req.method !== "GET" && !url.pathname.startsWith("/ui")) {
-        const response = Response.json({ error: "Method not allowed" }, { status: 405, headers });
-        recordHttpResponseTime(performance.now() - startTime, route, 405);
-        return response;
-      }
+            const success = deleteInvalidRecord(id);
+            const response = Response.json({ success }, { headers });
+            recordHttpResponseTime(performance.now() - startTime, route, 200);
+            const span = trace.getActiveSpan();
+            if (span) {
+              span.setAttributes({
+                'http.status_code': 200,
+                'api.record_id': id,
+                'api.delete_success': success
+              });
+            }
+            return response;
+          }
 
-      // Route handling
-      try {
-        if (url.pathname === config.api.invalidRecordsEndpoint) {
+          // Only accept GET requests for API endpoints (except the delete endpoint)
+          if (req.method !== "GET" && !url.pathname.startsWith("/ui")) {
+            const response = Response.json({ error: "Method not allowed" }, { status: 405, headers });
+            recordHttpResponseTime(performance.now() - startTime, route, 405);
+            const span = trace.getActiveSpan();
+            if (span) {
+              span.setAttributes({
+                'http.status_code': 405,
+                'error.type': 'MethodNotAllowed'
+              });
+            }
+            return response;
+          }
+
+          // Route handling
+          try {
+            if (url.pathname === config.api.invalidRecordsEndpoint) {
           // Query parameters
           const type = url.searchParams.get("type");
           const monitorName = url.searchParams.get("monitor");
@@ -254,16 +366,31 @@ export function startApiServer(port: number = config.metrics.port): Server {
             result = getAllInvalidRecords();
           }
 
-          const response = Response.json(result, { headers });
-          recordHttpResponseTime(performance.now() - startTime, route, 200);
-          return response;
-        } else if (
-          url.pathname === `${config.api.invalidRecordsEndpoint}/summary`
-        ) {
-          const summary = getInvalidRecordsSummary();
-          const response = Response.json(summary, { headers });
-          recordHttpResponseTime(performance.now() - startTime, route, 200);
-          return response;
+              const response = Response.json(result, { headers });
+              recordHttpResponseTime(performance.now() - startTime, route, 200);
+              const span = trace.getActiveSpan();
+              if (span) {
+                span.setAttributes({
+                  'http.status_code': 200,
+                  'api.query_type': type || monitorName ? (type ? 'by_type' : 'by_monitor') : 'all',
+                  'api.result_count': Array.isArray(result) ? result.length : 1
+                });
+              }
+              return response;
+            } else if (
+              url.pathname === `${config.api.invalidRecordsEndpoint}/summary`
+            ) {
+              const summary = getInvalidRecordsSummary();
+              const response = Response.json(summary, { headers });
+              recordHttpResponseTime(performance.now() - startTime, route, 200);
+              const span = trace.getActiveSpan();
+              if (span) {
+                span.setAttributes({
+                  'http.status_code': 200,
+                  'api.endpoint_type': 'summary'
+                });
+              }
+              return response;
         } else if (url.pathname === config.api.uiEndpoint) {
           // Format the KAFKA_CLIENT_ID for use in the title:
           // 1. Replace hyphens with spaces
@@ -296,39 +423,74 @@ export function startApiServer(port: number = config.metrics.port): Server {
               `<h1>${titlePrefix} Monitor Errors</h1>`,
             );
 
-          const response = new Response(modifiedHtml, {
-            headers: { "Content-Type": "text/html" },
-          });
-          recordHttpResponseTime(performance.now() - startTime, route, 200);
-          return response;
-        } else if (url.pathname === "/" || url.pathname === "/api") {
-          const response = Response.json({
-            message: "Synthetic Monitors API",
-            endpoints: [
-              config.api.invalidRecordsEndpoint,
-              `${config.api.invalidRecordsEndpoint}?type=monitor_transformation`,
-              `${config.api.invalidRecordsEndpoint}?monitor=monitor_name`,
-              `${config.api.invalidRecordsEndpoint}/summary`,
-              config.metrics.endpoint,
-              config.api.uiEndpoint,
-            ],
-          }, { headers });
-          recordHttpResponseTime(performance.now() - startTime, route, 200);
-          return response;
-        }
+              const response = new Response(modifiedHtml, {
+                headers: { "Content-Type": "text/html" },
+              });
+              recordHttpResponseTime(performance.now() - startTime, route, 200);
+              const span = trace.getActiveSpan();
+              if (span) {
+                span.setAttributes({
+                  'http.status_code': 200,
+                  'http.response_content_type': 'text/html',
+                  'api.ui_title_prefix': titlePrefix
+                });
+              }
+              return response;
+            } else if (url.pathname === "/" || url.pathname === "/api") {
+              const response = Response.json({
+                message: "Synthetic Monitors API",
+                endpoints: [
+                  config.api.invalidRecordsEndpoint,
+                  `${config.api.invalidRecordsEndpoint}?type=monitor_transformation`,
+                  `${config.api.invalidRecordsEndpoint}?monitor=monitor_name`,
+                  `${config.api.invalidRecordsEndpoint}/summary`,
+                  config.metrics.endpoint,
+                  config.api.uiEndpoint,
+                ],
+              }, { headers });
+              recordHttpResponseTime(performance.now() - startTime, route, 200);
+              const span = trace.getActiveSpan();
+              if (span) {
+                span.setAttributes({
+                  'http.status_code': 200,
+                  'api.endpoint_type': 'root'
+                });
+              }
+              return response;
+            }
 
-        const response = Response.json({ error: "Not found" }, { status: 404, headers });
-        recordHttpResponseTime(performance.now() - startTime, route, 404);
-        return response;
-      } catch (error) {
-        err("API error:", error);
-        const response = Response.json({
-          error: "Internal server error",
-          message: error instanceof Error ? error.message : String(error),
-        }, { status: 500, headers });
-        recordHttpResponseTime(performance.now() - startTime, route, 500);
-        return response;
-      }
+            const response = Response.json({ error: "Not found" }, { status: 404, headers });
+            recordHttpResponseTime(performance.now() - startTime, route, 404);
+            const span = trace.getActiveSpan();
+            if (span) {
+              span.setAttributes({
+                'http.status_code': 404,
+                'error.type': 'NotFound'
+              });
+            }
+            return response;
+          } catch (error) {
+            err("API error:", error);
+            const response = Response.json({
+              error: "Internal server error",
+              message: error instanceof Error ? error.message : String(error),
+            }, { status: 500, headers });
+            recordHttpResponseTime(performance.now() - startTime, route, 500);
+            const span = trace.getActiveSpan();
+            if (span) {
+              span.setAttributes({
+                'http.status_code': 500,
+                'error.type': error instanceof Error ? error.constructor.name : 'Error',
+                'error.message': error instanceof Error ? error.message : String(error)
+              });
+              if (error instanceof Error) {
+                span.recordException(error);
+              }
+            }
+            return response;
+          }
+        }
+      );
     },
   });
 
