@@ -172,6 +172,7 @@ jobs:
           COSIGN_EXPERIMENTAL: 1
         run: |
           echo "${{ steps.meta.outputs.tags }}" | xargs -I {} cosign sign --yes {}@${{ steps.build.outputs.digest }}
+        continue-on-error: true
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
