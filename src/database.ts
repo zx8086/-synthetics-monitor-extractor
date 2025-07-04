@@ -8,23 +8,23 @@ import { log, err } from "./utils/logger.js";
 // Ensure the data directory exists
 const DATA_DIR = join(import.meta.dir, "..", "data");
 if (!existsSync(DATA_DIR)) {
-  mkdirSync(DATA_DIR, { recursive: true });
+	mkdirSync(DATA_DIR, { recursive: true });
 }
 
 // Initialize database connection
 const db = new Database(join(DATA_DIR, "invalid_records.sqlite"), {
-  create: true,
+	create: true,
 });
 
 // Initialize the database schema
 export function initializeDatabase(): void {
-  try {
-    log(
-      `Initializing SQLite database at ${join(DATA_DIR, "invalid_records.sqlite")}...`,
-    );
+	try {
+		log(
+			`Initializing SQLite database at ${join(DATA_DIR, "invalid_records.sqlite")}...`,
+		);
 
-    // Create table for invalid records if it doesn't exist
-    db.run(`
+		// Create table for invalid records if it doesn't exist
+		db.run(`
       CREATE TABLE IF NOT EXISTS invalid_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         type TEXT NOT NULL,
@@ -36,106 +36,106 @@ export function initializeDatabase(): void {
       )
     `);
 
-    // Create index for faster lookups
-    db.run(`
+		// Create index for faster lookups
+		db.run(`
       CREATE INDEX IF NOT EXISTS idx_monitor_type
       ON invalid_records(monitor_name, type)
     `);
 
-    log("Database initialized successfully", {
-      database_event: "init",
-    });
-  } catch (error) {
-    err("Failed to initialize database", {
-      database_error: error,
-    });
-    throw error;
-  }
+		log("Database initialized successfully", {
+			database_event: "init",
+		});
+	} catch (error) {
+		err("Failed to initialize database", {
+			database_error: error,
+		});
+		throw error;
+	}
 }
 
 // Store an invalid record
 export function storeInvalidRecord(
-  type: string,
-  errorMessage: string,
-  monitorName?: string,
+	type: string,
+	errorMessage: string,
+	monitorName?: string,
 ): void {
-  const timestamp = new Date().toISOString();
+	const timestamp = new Date().toISOString();
 
-  try {
-    // Check if this error already exists for this monitor and type
-    const existingRecord = (db
-      .query(
-        `
+	try {
+		// Check if this error already exists for this monitor and type
+		const existingRecord = (db
+			.query(
+				`
       SELECT id, count FROM invalid_records
       WHERE type = ?
         AND monitor_name = ?
         AND error_message = ?
     `,
-      )
-      .get(type, monitorName || null, errorMessage) as {
-      id?: number;
-      count?: number;
-    }) || { id: undefined, count: undefined };
+			)
+			.get(type, monitorName || null, errorMessage) as {
+			id?: number;
+			count?: number;
+		}) || { id: undefined, count: undefined };
 
-    if (existingRecord) {
-      // Update existing record
-      db.run(
-        `
+		if (existingRecord) {
+			// Update existing record
+			db.run(
+				`
         UPDATE invalid_records
         SET count = $count, last_seen = $timestamp
         WHERE id = $id
       `,
-        [(existingRecord.count || 0) + 1, timestamp, existingRecord.id || 0],
-      );
-    } else {
-      // Insert new record
-      db.run(
-        `
+				[(existingRecord.count || 0) + 1, timestamp, existingRecord.id || 0],
+			);
+		} else {
+			// Insert new record
+			db.run(
+				`
         INSERT INTO invalid_records (
           type, monitor_name, error_message, first_seen, last_seen
         ) VALUES (
           $type, $monitorName, $errorMessage, $timestamp, $timestamp
         )
       `,
-        [type, monitorName || null, errorMessage, timestamp],
-      );
-    }
-  } catch (error) {
-    err("Error storing invalid record", {
-      database_error: error,
-    });
-    if (error instanceof Error) {
-      err("Error details", {
-        database_error_details: {
-          message: error.message,
-          stack: error.stack,
-          name: error.name,
-        },
-      });
-    }
-  }
+				[type, monitorName || null, errorMessage, timestamp],
+			);
+		}
+	} catch (error) {
+		err("Error storing invalid record", {
+			database_error: error,
+		});
+		if (error instanceof Error) {
+			err("Error details", {
+				database_error_details: {
+					message: error.message,
+					stack: error.stack,
+					name: error.name,
+				},
+			});
+		}
+	}
 }
 
 // Get all invalid records
 export function getAllInvalidRecords() {
-  return db
-    .query(
-      `
+	return db
+		.query(
+			`
     SELECT
       id, type, monitor_name, error_message,
       first_seen, last_seen, count
     FROM invalid_records
     ORDER BY last_seen DESC
   `,
-    )
-    .all();
+		)
+		.all();
 }
 
 // Get invalid records by type
 export function getInvalidRecordsByType(type: string) {
-  return db
-    .query(
-      `
+	return db
+		.query(
+			`
     SELECT
       id, type, monitor_name, error_message,
       first_seen, last_seen, count
@@ -143,15 +143,15 @@ export function getInvalidRecordsByType(type: string) {
     WHERE type = ?
     ORDER BY last_seen DESC
   `,
-    )
-    .all(type);
+		)
+		.all(type);
 }
 
 // Get invalid records by monitor name
 export function getInvalidRecordsByMonitor(monitorName: string) {
-  return db
-    .query(
-      `
+	return db
+		.query(
+			`
     SELECT
       id, type, monitor_name, error_message,
       first_seen, last_seen, count
@@ -159,15 +159,15 @@ export function getInvalidRecordsByMonitor(monitorName: string) {
     WHERE monitor_name = ?
     ORDER BY last_seen DESC
   `,
-    )
-    .all(monitorName);
+		)
+		.all(monitorName);
 }
 
 // Get summary of invalid records grouped by type
 export function getInvalidRecordsSummary() {
-  return db
-    .query(
-      `
+	return db
+		.query(
+			`
     SELECT
       type,
       COUNT(DISTINCT monitor_name) as monitor_count,
@@ -177,24 +177,24 @@ export function getInvalidRecordsSummary() {
     GROUP BY type
     ORDER BY latest_error DESC
   `,
-    )
-    .all();
+		)
+		.all();
 }
 
 // Delete a record by ID
 export function deleteInvalidRecord(id: number): boolean {
-  try {
-    const result = db.run(`DELETE FROM invalid_records WHERE id = ?`, [id]);
-    return result.changes > 0;
-  } catch (error) {
-    err(`Error deleting invalid record with ID ${id}`, {
-      database_error: error,
-    });
-    return false;
-  }
+	try {
+		const result = db.run(`DELETE FROM invalid_records WHERE id = ?`, [id]);
+		return result.changes > 0;
+	} catch (error) {
+		err(`Error deleting invalid record with ID ${id}`, {
+			database_error: error,
+		});
+		return false;
+	}
 }
 
 // Close database connection
 export function closeDatabase() {
-  db.close();
+	db.close();
 }

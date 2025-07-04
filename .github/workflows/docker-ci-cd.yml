@@ -11,6 +11,8 @@ on:
     - cron: "0 0 * * 0"
 
 env:
+  REGISTRY: docker.io
+  IMAGE_NAME: zx8086/synthetics-monitor-extractor
   BUILDKIT_STEP_LOG_MAX_SIZE: 10000000
   BUILDKIT_STEP_LOG_MAX_SPEED: 1000000
   DOCKER_BUILDKIT: 1
@@ -198,7 +200,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: zx8086/synthetics-monitor-extractor
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -233,10 +235,10 @@ jobs:
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.17.2
         if: github.event_name != 'pull_request'
         with:
-          image: zx8086/synthetics-monitor-extractor:${{ github.sha }}
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: spdx-json
           output-file: sbom.spdx.json
         continue-on-error: true
@@ -245,7 +247,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: github.event_name != 'pull_request'
         with:
-          name: sbom-${{ matrix.platform }}
+          name: sbom-${{ strategy.job-index }}
           path: sbom.spdx.json
         continue-on-error: true
 
@@ -259,14 +261,29 @@ jobs:
           
           cd "${GITHUB_WORKSPACE}/tmp"
 
+          # Detect architecture
+          ARCH=$(uname -m)
+          case $ARCH in
+            x86_64)
+              ARCH_SUFFIX="amd64"
+              ;;
+            aarch64|arm64)
+              ARCH_SUFFIX="arm64"
+              ;;
+            *)
+              echo "Unsupported architecture: $ARCH"
+              exit 1
+              ;;
+          esac
+
           # Install cosign
-          curl -Lo cosign "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"
+          curl -Lo cosign "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-${ARCH_SUFFIX}"
           chmod +x cosign
           mv cosign "${GITHUB_WORKSPACE}/bin/"
 
           # Install syft
           SYFT_RELEASE=$(curl -s https://api.github.com/repos/anchore/syft/releases/latest | grep -o '"tag_name": ".*"' | cut -d'"' -f4)
-          curl -Lo syft.tar.gz "https://github.com/anchore/syft/releases/download/${SYFT_RELEASE}/syft_${SYFT_RELEASE#v}_linux_amd64.tar.gz"
+          curl -Lo syft.tar.gz "https://github.com/anchore/syft/releases/download/${SYFT_RELEASE}/syft_${SYFT_RELEASE#v}_linux_${ARCH_SUFFIX}.tar.gz"
           tar xzf syft.tar.gz syft
           mv syft "${GITHUB_WORKSPACE}/bin/"
 
@@ -301,7 +318,7 @@ jobs:
             -e COMMIT_HASH=${{ github.sha }} \
             -e BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             -e LOG_LEVEL=info \
-            zx8086/synthetics-monitor-extractor:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           
           # Add delay and better error handling
           sleep 15
@@ -347,7 +364,7 @@ jobs:
             
           # Monitor on master branch
           if [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
-            snyk container monitor zx8086/synthetics-monitor-extractor:${{ github.sha }} \
+            snyk container monitor ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
               --file=Dockerfile || echo "Container monitor command failed but continuing..."
           fi
         continue-on-error: true
@@ -368,7 +385,7 @@ jobs:
           
           # Generate multiple SBOM formats
           echo "Generating SBOM files..."
-          syft zx8086/synthetics-monitor-extractor:${{ github.sha }} \
+          "${GITHUB_WORKSPACE}/bin/syft" ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             -o json=sbom-output/syft-sbom.json \
             -o spdx-json=sbom-output/spdx-sbom.json \
             -o cyclonedx-json=sbom-output/cyclonedx-sbom.json || echo "SBOM generation failed but continuing..."
@@ -382,7 +399,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: comprehensive-sbom-${{ matrix.platform }}
+          name: comprehensive-sbom-${{ strategy.job-index }}
           path: sbom-output/
           retention-days: 90
         continue-on-error: true
@@ -447,7 +464,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: attestation-results-${{ matrix.platform }}
+          name: attestation-results-${{ strategy.job-index }}
           path: |
             ${{ env.ATTESTATION_RESULTS_DIR }}/*.json
             ${{ env.ATTESTATION_RESULTS_DIR }}/*.md
