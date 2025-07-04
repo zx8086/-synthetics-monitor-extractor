@@ -380,10 +380,33 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
           dataset: hit._source.event.dataset
         } } : {}),
         ...(dataStream ? { data_stream: dataStream } : {}),
-        ...(hit._source.ecs ? { ecs: hit._source.ecs } : {}),
+        ...(hit._source.ecs && hit._source.ecs.version ? { ecs: { version: hit._source.ecs.version } } : {}),
         ...(hit._source.config_id ? { config_id: hit._source.config_id } : {}),
-        ...(hit._source.agent ? { agent: hit._source.agent } : {}),
-        ...(hit._source.observer ? { observer: hit._source.observer } : {}),
+        ...(hit._source.agent &&
+            hit._source.agent.name &&
+            hit._source.agent.id &&
+            hit._source.agent.type &&
+            hit._source.agent.version
+          ? {
+              agent: {
+                name: hit._source.agent.name,
+                id: hit._source.agent.id,
+                type: hit._source.agent.type,
+                version: hit._source.agent.version,
+                ephemeral_id: hit._source.agent.ephemeral_id || ""
+              }
+            }
+          : {}),
+        ...(hit._source.observer && hit._source.observer.name
+          ? {
+              observer: {
+                name: hit._source.observer.name || "",
+                ...(hit._source.observer.geo && hit._source.observer.geo.name
+                  ? { geo: { name: hit._source.observer.geo.name || "" } }
+                  : {})
+              }
+            }
+          : {}),
         ...(hit._source.meta ? { meta: hit._source.meta } : {})
       };
 
@@ -492,12 +515,28 @@ process.on("SIGTERM", async () => {
     await closeElasticsearchClient();
     await closeKafkaProducer();
     closeDatabase(); // Close the database connection
-    
     // Shut down OpenTelemetry if it was initialized
     if (otelSdk) {
       await otelSdk.shutdown();
     }
-    
+    log("All connections closed successfully");
+  } catch (error) {
+    err("Error during shutdown:", error);
+  }
+  console.log("Synthetics Monitor Extractor exited.");
+  process.exit(0);
+});
+
+// Also handle SIGINT (Ctrl+C) the same way
+process.on("SIGINT", async () => {
+  log("Received SIGINT, shutting down gracefully");
+  try {
+    await closeElasticsearchClient();
+    await closeKafkaProducer();
+    closeDatabase();
+    if (otelSdk) {
+      await otelSdk.shutdown();
+    }
     log("All connections closed successfully");
   } catch (error) {
     err("Error during shutdown:", error);

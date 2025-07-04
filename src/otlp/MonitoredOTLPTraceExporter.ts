@@ -16,9 +16,6 @@ export class MonitoredOTLPTraceExporter extends MonitoredOTLPExporter<ReadableSp
     timeoutMillis: number = 10000,
   ) {
     super(exporterConfig, exporterConfig.url || "", timeoutMillis);
-    console.log(`DEBUG: MonitoredOTLPTraceExporter constructor - timeout: ${timeoutMillis}ms, url: ${exporterConfig.url}`);
-    console.log(`DEBUG: Full exporter config:`, { ...exporterConfig, timeoutMillis });
-    
     this.otlpExporter = new OTLPTraceExporter({
       ...exporterConfig,
       timeoutMillis: timeoutMillis,
@@ -30,14 +27,12 @@ export class MonitoredOTLPTraceExporter extends MonitoredOTLPExporter<ReadableSp
         maxFreeSockets: 2,
       },
     });
-    console.log(`DEBUG: OTLPTraceExporter created with timeout: ${timeoutMillis}ms and enhanced httpAgentOptions`);
   }
 
   async export(
     spans: ReadableSpan[],
     resultCallback: (result: ExportResult) => void,
   ): Promise<void> {
-    console.log(`Starting trace export with timeout ${this.timeoutMillis}ms`);
     this.totalExports++;
     const exportStartTime = Date.now();
 
@@ -50,14 +45,11 @@ export class MonitoredOTLPTraceExporter extends MonitoredOTLPExporter<ReadableSp
           reject(new Error(`Trace export timed out after ${this.timeoutMillis}ms (internal timeout)`));
         }, this.timeoutMillis);
 
-        console.log("Calling traceExporter.export");
         this.otlpExporter.export(spans, (result) => {
           clearTimeout(timeoutId);
           const duration = Date.now() - exportStartTime;
-          console.log(`traceExporter.export callback received after ${duration}ms`);
           
           if (result.code !== 0 && duration < this.timeoutMillis) {
-            console.log(`Forcing success despite result code: ${result.code}`);
             result.code = 0;
           }
 
@@ -71,7 +63,6 @@ export class MonitoredOTLPTraceExporter extends MonitoredOTLPExporter<ReadableSp
         });
       });
 
-      console.log("Waiting for exportPromise to resolve");
       await exportPromise;
       this.logExportDuration(exportStartTime);
       resultCallback({ code: 0 });

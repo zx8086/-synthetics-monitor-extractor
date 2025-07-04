@@ -90,6 +90,19 @@ const ApiConfigSchema = z.object({
   enabled: z.boolean().default(true),
   invalidRecordsEndpoint: z.string().default("/api/invalid-records"),
   uiEndpoint: z.string().default("/ui"),
+  rateLimit: z.object({
+    enabled: z.boolean().default(false),
+    windowMs: z.number().min(1000).max(300000).default(60000), // 1 minute
+    maxRequests: z.number().min(1).max(10000).default(100), // requests per window
+    skipSuccessfulRequests: z.boolean().default(false),
+    skipFailedRequests: z.boolean().default(false),
+  }).default({
+    enabled: false,
+    windowMs: 60000,
+    maxRequests: 100,
+    skipSuccessfulRequests: false,
+    skipFailedRequests: false,
+  }),
 });
 
 const OpenTelemetryConfigSchema = z.object({
@@ -166,6 +179,13 @@ const defaultConfig: Config = {
     enabled: true,
     invalidRecordsEndpoint: "/api/invalid-records",
     uiEndpoint: "/ui",
+    rateLimit: {
+      enabled: false,
+      windowMs: 60000,
+      maxRequests: 100,
+      skipSuccessfulRequests: false,
+      skipFailedRequests: false,
+    },
   },
   openTelemetry: {
     enabled: false,
@@ -232,6 +252,13 @@ const envVarMapping = {
     enabled: "API_ENABLED",
     invalidRecordsEndpoint: "API_INVALID_RECORDS_ENDPOINT",
     uiEndpoint: "API_UI_ENDPOINT",
+    rateLimit: {
+      enabled: "API_RATE_LIMIT_ENABLED",
+      windowMs: "API_RATE_LIMIT_WINDOW_MS",
+      maxRequests: "API_RATE_LIMIT_MAX_REQUESTS",
+      skipSuccessfulRequests: "API_RATE_LIMIT_SKIP_SUCCESSFUL_REQUESTS",
+      skipFailedRequests: "API_RATE_LIMIT_SKIP_FAILED_REQUESTS",
+    },
   },
   openTelemetry: {
     enabled: "OPEN_TELEMETRY_ENABLED",
@@ -375,6 +402,13 @@ function loadConfigFromEnv(): Partial<Config> {
     enabled: getEnvConfig(envVarMapping.api.enabled, "boolean"),
     invalidRecordsEndpoint: getEnvConfig(envVarMapping.api.invalidRecordsEndpoint, "string"),
     uiEndpoint: getEnvConfig(envVarMapping.api.uiEndpoint, "string"),
+    rateLimit: {
+      enabled: getEnvConfig(envVarMapping.api.rateLimit.enabled, "boolean"),
+      windowMs: getEnvConfig(envVarMapping.api.rateLimit.windowMs, "number"),
+      maxRequests: getEnvConfig(envVarMapping.api.rateLimit.maxRequests, "number"),
+      skipSuccessfulRequests: getEnvConfig(envVarMapping.api.rateLimit.skipSuccessfulRequests, "boolean"),
+      skipFailedRequests: getEnvConfig(envVarMapping.api.rateLimit.skipFailedRequests, "boolean"),
+    },
   };
 
   // Load OpenTelemetry config

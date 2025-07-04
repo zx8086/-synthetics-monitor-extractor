@@ -16,9 +16,6 @@ export class MonitoredOTLPLogExporter extends MonitoredOTLPExporter<ReadableLogR
     timeoutMillis: number = 10000,
   ) {
     super(exporterConfig, exporterConfig.url || "", timeoutMillis);
-    console.log(`DEBUG: MonitoredOTLPLogExporter constructor - timeout: ${timeoutMillis}ms, url: ${exporterConfig.url}`);
-    console.log(`DEBUG: Full log exporter config:`, { ...exporterConfig, timeoutMillis });
-    
     this.otlpExporter = new OTLPLogExporter({
       ...exporterConfig,
       timeoutMillis: timeoutMillis,
@@ -30,14 +27,12 @@ export class MonitoredOTLPLogExporter extends MonitoredOTLPExporter<ReadableLogR
         maxFreeSockets: 2,
       },
     });
-    console.log(`DEBUG: OTLPLogExporter created with timeout: ${timeoutMillis}ms and enhanced httpAgentOptions`);
   }
 
   async export(
     logs: ReadableLogRecord[],
     resultCallback: (result: ExportResult) => void,
   ): Promise<void> {
-    console.log(`Starting log export with timeout ${this.timeoutMillis}ms`);
     this.totalExports++;
     const exportStartTime = Date.now();
 
@@ -50,14 +45,11 @@ export class MonitoredOTLPLogExporter extends MonitoredOTLPExporter<ReadableLogR
           reject(new Error(`Log export timed out after ${this.timeoutMillis}ms (internal timeout)`));
         }, this.timeoutMillis);
 
-        console.log("Calling logExporter.export");
         this.otlpExporter.export(logs, (result) => {
           clearTimeout(timeoutId);
           const duration = Date.now() - exportStartTime;
-          console.log(`logExporter.export callback received after ${duration}ms`);
           
           if (result.code !== 0 && duration < this.timeoutMillis) {
-            console.log(`Forcing success despite result code: ${result.code}`);
             result.code = 0;
           }
 
@@ -71,7 +63,6 @@ export class MonitoredOTLPLogExporter extends MonitoredOTLPExporter<ReadableLogR
         });
       });
 
-      console.log("Waiting for exportPromise to resolve");
       await exportPromise;
       this.logExportDuration(exportStartTime);
       resultCallback({ code: 0 });
