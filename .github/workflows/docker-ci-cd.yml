@@ -213,6 +213,7 @@ jobs:
             org.opencontainers.image.licenses=MIT
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -228,17 +229,36 @@ jobs:
             COMMIT_HASH=${{ github.sha }}
           sbom: true
           provenance: true
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
 
       - name: Move cache
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
+      - name: Wait for image to be available
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Waiting for image to be available in registry..."
+          # Get the first tag from metadata
+          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d' ' -f1 | sed 's/.*://')
+          echo "Using image tag: ${IMAGE_TAG}"
+          # Wait for the image to be pushed and available
+          for i in {1..30}; do
+            if docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG} >/dev/null 2>&1; then
+              echo "Image is available!"
+              break
+            fi
+            echo "Waiting for image... (attempt $i/30)"
+            sleep 5
+          done
+        continue-on-error: true
+
       - name: Generate SBOM
         uses: anchore/sbom-action@v0.17.2
         if: github.event_name != 'pull_request'
         with:
-          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          image: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: spdx-json
           output-file: sbom.spdx.json
         continue-on-error: true
@@ -310,6 +330,8 @@ jobs:
           docker rm -f synthetics-monitor-test 2>/dev/null || true
           
           # Run container (will automatically use correct architecture)
+          # Use the first tag from metadata output
+          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d' ' -f1 | sed 's/.*://')
           docker run -d \
             --name synthetics-monitor-test \
             -p 3000:3000 \
@@ -318,7 +340,7 @@ jobs:
             -e COMMIT_HASH=${{ github.sha }} \
             -e BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             -e LOG_LEVEL=info \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
           
           # Add delay and better error handling
           sleep 15
@@ -356,7 +378,10 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           echo "Running Snyk container scan..."
-          snyk container test zx8086/synthetics-monitor-extractor:${{ github.sha }} \
+          # Get the first tag from metadata
+          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d' ' -f1)
+          echo "Scanning image: ${IMAGE_TAG}"
+          snyk container test ${IMAGE_TAG} \
             --file=Dockerfile \
             --severity-threshold=high \
             --sarif-file-output=snyk-container.sarif \
@@ -364,7 +389,7 @@ jobs:
             
           # Monitor on master branch
           if [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
-            snyk container monitor ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            snyk container monitor ${IMAGE_TAG} \
               --file=Dockerfile || echo "Container monitor command failed but continuing..."
           fi
         continue-on-error: true
@@ -385,7 +410,10 @@ jobs:
           
           # Generate multiple SBOM formats
           echo "Generating SBOM files..."
-          "${GITHUB_WORKSPACE}/bin/syft" ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+          # Get the first tag from metadata
+          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d' ' -f1)
+          echo "Scanning image: ${IMAGE_TAG}"
+          "${GITHUB_WORKSPACE}/bin/syft" ${IMAGE_TAG} \
             -o json=sbom-output/syft-sbom.json \
             -o spdx-json=sbom-output/spdx-sbom.json \
             -o cyclonedx-json=sbom-output/cyclonedx-sbom.json || echo "SBOM generation failed but continuing..."
@@ -416,7 +444,9 @@ jobs:
           
           # Get image digest and reference
           echo "Getting image digest..."
-          IMAGE_REF="zx8086/synthetics-monitor-extractor:${{ github.sha }}"
+          # Get the first tag from metadata
+          IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d' ' -f1)
+          IMAGE_REF="${IMAGE_TAG}"
           IMAGE_DIGEST=$(docker buildx imagetools inspect "${IMAGE_REF}" --raw | jq -r '.manifests[0].digest' 2>/dev/null || echo "unknown")
           
           if [ "$IMAGE_DIGEST" != "unknown" ]; then
