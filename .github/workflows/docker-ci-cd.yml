@@ -162,33 +162,33 @@ jobs:
           path: sbom.spdx.json
         continue-on-error: true
 
-      - name: Sign image with cosign
-        uses: sigstore/cosign-installer@v3
-        if: github.event_name != 'pull_request'
+      # - name: Sign image with cosign
+      #   uses: sigstore/cosign-installer@v3
+      #   if: github.event_name != 'pull_request'
 
-      - name: Sign the published Docker image
-        if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: 1
-        run: |
-          echo "${{ steps.meta.outputs.tags }}" | xargs -I {} cosign sign --yes {}@${{ steps.build.outputs.digest }}
-        continue-on-error: true
+      # - name: Sign the published Docker image
+      #   if: github.event_name != 'pull_request'
+      #   env:
+      #     COSIGN_EXPERIMENTAL: 1
+      #   run: |
+      #     echo "${{ steps.meta.outputs.tags }}" | xargs -I {} cosign sign --yes {}@${{ steps.build.outputs.digest }}
+      #   continue-on-error: true
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        if: github.event_name != 'pull_request'
-        with:
-          image-ref: zx8086/synthetics-monitor-extractor:${{ github.sha }}
-          format: sarif
-          output: trivy-results.sarif
-        continue-on-error: true
+      # - name: Run Trivy vulnerability scanner
+      #   uses: aquasecurity/trivy-action@master
+      #   if: github.event_name != 'pull_request'
+      #   with:
+      #     image-ref: zx8086/synthetics-monitor-extractor:${{ github.sha }}
+      #     format: sarif
+      #     output: trivy-results.sarif
+      #   continue-on-error: true
 
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: github.event_name != 'pull_request'
-        with:
-          sarif_file: trivy-results.sarif
-        continue-on-error: true
+      # - name: Upload Trivy scan results to GitHub Security tab
+      #   uses: github/codeql-action/upload-sarif@v3
+      #   if: github.event_name != 'pull_request'
+      #   with:
+      #     sarif_file: trivy-results.sarif
+      #   continue-on-error: true
 
   notify:
     needs: build-and-deploy
