@@ -19,10 +19,7 @@ const KafkaMessageSchema = z.object({
   topic: z.string(),
   key: z.string(),
   value: z.string(),
-  headers: z.union([
-    z.record(z.string()),
-    z.map(z.string(), z.string())
-  ]),
+  headers: z.union([z.record(z.string()), z.map(z.string(), z.string())]),
 });
 
 type KafkaMessage = z.infer<typeof KafkaMessageSchema>;
@@ -142,15 +139,20 @@ function createMessageKey(monitor: MonitorInfo): string {
 
 function createMessageHeaders(monitor: MonitorInfo): Map<string, string> {
   const headers = new Map<string, string>();
-  
+
   // Only add headers if the values exist
   if (monitor.type) headers.set("monitor-type", monitor.type);
   if (monitor.monitor.status) headers.set("status", monitor.monitor.status);
-  if (monitor.businessContext.domain) headers.set("domain", monitor.businessContext.domain);
-  if (monitor.businessContext.department) headers.set("department", monitor.businessContext.department);
-  if (monitor.businessContext.environment) headers.set("environment", monitor.businessContext.environment);
-  if (monitor.data_stream?.dataset) headers.set("dataset", monitor.data_stream.dataset);
-  if (monitor.businessContext.criticality) headers.set("criticality", monitor.businessContext.criticality);
+  if (monitor.businessContext.domain)
+    headers.set("domain", monitor.businessContext.domain);
+  if (monitor.businessContext.department)
+    headers.set("department", monitor.businessContext.department);
+  if (monitor.businessContext.environment)
+    headers.set("environment", monitor.businessContext.environment);
+  if (monitor.data_stream?.dataset)
+    headers.set("dataset", monitor.data_stream.dataset);
+  if (monitor.businessContext.criticality)
+    headers.set("criticality", monitor.businessContext.criticality);
 
   return headers;
 }
@@ -170,9 +172,7 @@ export async function sendMonitorDataToKafka(
   const singleTopicName = config.kafka.topicName;
 
   try {
-    log(
-      `Sending ${monitorData.length} messages to topic: ${singleTopicName}`,
-    );
+    log(`Sending ${monitorData.length} messages to topic: ${singleTopicName}`);
 
     const messages = monitorData.map((item) => {
       const domain = item.businessContext.domain || "unknown";
@@ -207,15 +207,15 @@ export async function sendMonitorDataToKafka(
         agent: item.agent,
         observer: item.observer,
         meta: item.meta,
-        project: item.project,
-        timespan: item.timespan,
-        check_group: item.check_group,
-        fleet_managed: item.fleet_managed,
-        origin: item.origin,
+        project: item.monitor.project,
+        timespan: item.monitor.timespan,
+        check_group: item.monitor.check_group,
+        fleet_managed: item.monitor.fleet_managed,
+        origin: item.monitor.origin,
         ip: item.ip,
         url: item.url,
         tags: item.tags,
-        "@timestamp": item.timestamp
+        "@timestamp": item.timestamp,
       };
 
       // Validate message content matches original document structure
@@ -235,20 +235,24 @@ export async function sendMonitorDataToKafka(
         agent: item.agent,
         observer: item.observer,
         meta: item.meta,
-        project: item.project,
-        timespan: item.timespan,
-        check_group: item.check_group,
-        fleet_managed: item.fleet_managed,
-        origin: item.origin,
+        project: item.monitor.project,
+        timespan: item.monitor.timespan,
+        check_group: item.monitor.check_group,
+        fleet_managed: item.monitor.fleet_managed,
+        origin: item.monitor.origin,
         ip: item.ip,
         url: item.url,
         tags: item.tags,
-        "@timestamp": item.timestamp
+        "@timestamp": item.timestamp,
       });
-      
+
       if (differences.length > 0) {
-        err(`Message content mismatch detected (key: ${uniqueKey}, type: ${item.type}, differences: ${JSON.stringify(differences)})`);
-        throw new Error('Message content validation failed - content is not identical');
+        err(
+          `Message content mismatch detected (key: ${uniqueKey}, type: ${item.type}, differences: ${JSON.stringify(differences)})`,
+        );
+        throw new Error(
+          "Message content validation failed - content is not identical",
+        );
       }
 
       // Log the message being sent
@@ -270,9 +274,7 @@ export async function sendMonitorDataToKafka(
       acks: ProduceAcks.LEADER, // Only wait for leader acknowledgment
     });
 
-    log(
-      `Successfully sent ${messages.length} messages to ${singleTopicName}`,
-    );
+    log(`Successfully sent ${messages.length} messages to ${singleTopicName}`);
   } catch (error: any) {
     if (error.code === "PLT_KFK_PRODUCER_ERROR") {
       err(`Producer error: ${error.message}`);
@@ -286,46 +288,62 @@ export async function sendMonitorDataToKafka(
 }
 
 // Helper function to find differences between objects
-function findDifferences(obj1: any, obj2: any, path: string = ''): string[] {
+function findDifferences(obj1: any, obj2: any, path: string = ""): string[] {
   const differences: string[] = [];
-  
+
   // Skip comparison if either object is undefined
   if (obj1 === undefined || obj2 === undefined) {
     return differences;
   }
-  
+
   // Check if both are objects
-  if (typeof obj1 === 'object' && typeof obj2 === 'object' && obj1 !== null && obj2 !== null) {
+  if (
+    typeof obj1 === "object" &&
+    typeof obj2 === "object" &&
+    obj1 !== null &&
+    obj2 !== null
+  ) {
     // Get all keys from both objects
     const allKeys = new Set([...Object.keys(obj1), ...Object.keys(obj2)]);
-    
+
     for (const key of allKeys) {
       const newPath = path ? `${path}.${key}` : key;
-      
+
       // Skip _source field as it's a special case
-      if (key === '_source') continue;
-      
+      if (key === "_source") continue;
+
       // Check if key exists in both objects
       if (!(key in obj1)) {
-        differences.push(`${newPath} is missing in original Elasticsearch document`);
+        differences.push(
+          `${newPath} is missing in original Elasticsearch document`,
+        );
         continue;
       }
       if (!(key in obj2)) {
         differences.push(`${newPath} is missing in Kafka message`);
         continue;
       }
-      
+
       // Recursively check nested objects
-      if (typeof obj1[key] === 'object' && typeof obj2[key] === 'object' && obj1[key] !== null && obj2[key] !== null) {
+      if (
+        typeof obj1[key] === "object" &&
+        typeof obj2[key] === "object" &&
+        obj1[key] !== null &&
+        obj2[key] !== null
+      ) {
         differences.push(...findDifferences(obj1[key], obj2[key], newPath));
       } else if (JSON.stringify(obj1[key]) !== JSON.stringify(obj2[key])) {
-        differences.push(`${newPath} has different values: ${JSON.stringify(obj1[key])} vs ${JSON.stringify(obj2[key])}`);
+        differences.push(
+          `${newPath} has different values: ${JSON.stringify(obj1[key])} vs ${JSON.stringify(obj2[key])}`,
+        );
       }
     }
   } else if (JSON.stringify(obj1) !== JSON.stringify(obj2)) {
-    differences.push(`${path} has different values: ${JSON.stringify(obj1)} vs ${JSON.stringify(obj2)}`);
+    differences.push(
+      `${path} has different values: ${JSON.stringify(obj1)} vs ${JSON.stringify(obj2)}`,
+    );
   }
-  
+
   return differences;
 }
 
@@ -333,8 +351,17 @@ function findDifferences(obj1: any, obj2: any, path: string = ''): string[] {
 function validateMonitorSection(original: any, transformed: any): string[] {
   const differences: string[] = [];
   const monitorFields = [
-    'id', 'name', 'type', 'status', 'duration', 'ip', 'origin',
-    'timespan', 'fleet_managed', 'check_group', 'project'
+    "id",
+    "name",
+    "type",
+    "status",
+    "duration",
+    "ip",
+    "origin",
+    "timespan",
+    "fleet_managed",
+    "check_group",
+    "project",
   ];
 
   // Check if monitor section exists in both
@@ -342,18 +369,25 @@ function validateMonitorSection(original: any, transformed: any): string[] {
     return differences;
   }
   if (!original.monitor) {
-    differences.push('monitor section is missing in original Elasticsearch document');
+    differences.push(
+      "monitor section is missing in original Elasticsearch document",
+    );
     return differences;
   }
   if (!transformed.monitor) {
-    differences.push('monitor section is missing in Kafka message');
+    differences.push("monitor section is missing in Kafka message");
     return differences;
   }
 
   // Check each monitor field
   for (const field of monitorFields) {
-    if (JSON.stringify(original.monitor[field]) !== JSON.stringify(transformed.monitor[field])) {
-      differences.push(`monitor.${field} has different values: ${JSON.stringify(original.monitor[field])} vs ${JSON.stringify(transformed.monitor[field])}`);
+    if (
+      JSON.stringify(original.monitor[field]) !==
+      JSON.stringify(transformed.monitor[field])
+    ) {
+      differences.push(
+        `monitor.${field} has different values: ${JSON.stringify(original.monitor[field])} vs ${JSON.stringify(transformed.monitor[field])}`,
+      );
     }
   }
 
@@ -369,9 +403,7 @@ export async function checkKafkaConnection(): Promise<{
   monitoringTopics: string[];
 }> {
   try {
-    log(
-      `Checking Kafka connection at: ${config.kafka.brokers.join(",")}`
-    );
+    log(`Checking Kafka connection at: ${config.kafka.brokers.join(",")}`);
 
     const admin = getKafkaAdmin();
 
@@ -438,20 +470,24 @@ function simulateHttpMessage(): MonitorInfo {
       domain: "api.example.com",
       port: 443,
       path: "/health",
-      full: "https://api.example.com/health"
+      full: "https://api.example.com/health",
     },
     timestamp: "2024-03-20T10:00:00.000Z",
-    status: "up",
-    duration: 150,
-    dataset: "http",
     businessContext: {
       domain: "test-domain",
       department: "test-department",
       criticality: "high",
-      environment: "production"
+      environment: "production",
     },
-    tags: ["test", "http", "domain:test-domain", "department:test-department", "criticality:high", "environment:production"],
-    environment: "eu-west-1",
+    tags: [
+      "test",
+      "http",
+      "domain:test-domain",
+      "department:test-department",
+      "criticality:high",
+      "environment:production",
+    ],
+    // environment property removed as it's not in the MonitorInfo interface
     monitor: {
       id: "test-monitor-123",
       name: "Test HTTP Monitor",
@@ -462,14 +498,14 @@ function simulateHttpMessage(): MonitorInfo {
       origin: "project",
       timespan: {
         gte: "2024-03-20T10:00:00.000Z",
-        lt: "2024-03-20T10:01:00.000Z"
+        lt: "2024-03-20T10:01:00.000Z",
       },
       fleet_managed: true,
       check_group: "test-check-group-123",
       project: {
         name: "test-project",
-        id: "test-project"
-      }
+        id: "test-project",
+      },
     },
     http: {
       response: {
@@ -477,18 +513,18 @@ function simulateHttpMessage(): MonitorInfo {
         mime_type: "application/json",
         headers: {
           "Content-Type": "application/json",
-          "Server": "nginx/1.18.0"
+          Server: "nginx/1.18.0",
         },
         body: {
           bytes: 45,
           content: '{"status":"ok","message":"Service is healthy"}',
-          hash: "abc123hash"
-        }
+          hash: "abc123hash",
+        },
       },
       rtt: {
-        total: { us: 150 }
+        total: { us: 150 },
       },
-      state: "up"
+      state: "up",
     },
     tls: {
       established: true,
@@ -503,23 +539,23 @@ function simulateHttpMessage(): MonitorInfo {
           not_before: "2024-01-01T00:00:00.000Z",
           subject: {
             distinguished_name: "CN=api.example.com",
-            common_name: "api.example.com"
+            common_name: "api.example.com",
           },
           issuer: {
             distinguished_name: "CN=Let's Encrypt Authority X3",
-            common_name: "Let's Encrypt Authority X3"
+            common_name: "Let's Encrypt Authority X3",
           },
           public_key_algorithm: "RSA",
           signature_algorithm: "SHA256-RSA",
           public_key_size: 2048,
           public_key_exponent: 65537,
-          serial_number: "1234567890"
+          serial_number: "1234567890",
         },
         hash: {
           sha1: "abc123sha1",
-          sha256: "abc123sha256"
-        }
-      }
+          sha256: "abc123sha256",
+        },
+      },
     },
     summary: {
       retry_group: "test-retry-group",
@@ -528,7 +564,7 @@ function simulateHttpMessage(): MonitorInfo {
       down: 0,
       attempt: 1,
       final_attempt: true,
-      status: "up"
+      status: "up",
     },
     state: {
       duration_ms: "60000",
@@ -539,20 +575,21 @@ function simulateHttpMessage(): MonitorInfo {
       id: "test-state-123",
       down: 0,
       flap_history: [],
-      status: "up"
+      status: "up",
     },
     event: {
       dataset: "http",
-      duration: 150,
-      type: ["info"]
+      type: "info",
+      agent_id_status: "verified",
+      ingested: "2024-03-20T10:00:00.000Z",
     },
     data_stream: {
       namespace: "default",
       type: "synthetics",
-      dataset: "http"
+      dataset: "http",
     },
     ecs: {
-      version: "8.0.0"
+      version: "8.0.0",
     },
     config_id: "test-config-123",
     agent: {
@@ -560,29 +597,20 @@ function simulateHttpMessage(): MonitorInfo {
       id: "test-agent-id",
       type: "heartbeat",
       version: "8.0.0",
-      ephemeral_id: "test-ephemeral-id"
+      ephemeral_id: "test-ephemeral-id",
     },
     observer: {
       name: "test-observer",
       geo: {
-        name: "eu-west-1"
-      }
+        name: "eu-west-1",
+      },
     },
     meta: {
-      space_id: "default"
+      space_id: "default",
     },
-    project: {
-      name: "test-project",
-      id: "test-project"
-    },
-    timespan: {
-      gte: "2024-03-20T10:00:00.000Z",
-      lt: "2024-03-20T10:01:00.000Z"
-    },
-    check_group: "test-check-group-123",
-    fleet_managed: true,
-    origin: "project",
-    ip: "10.0.0.1"
+    // Remove top-level project, timespan, check_group, fleet_managed, and origin
+    // as they're not in the MonitorInfo interface but inside monitor object
+    ip: "10.0.0.1",
   };
 }
 

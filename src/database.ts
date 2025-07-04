@@ -12,13 +12,17 @@ if (!existsSync(DATA_DIR)) {
 }
 
 // Initialize database connection
-const db = new Database(join(DATA_DIR, "invalid_records.sqlite"), { create: true });
+const db = new Database(join(DATA_DIR, "invalid_records.sqlite"), {
+  create: true,
+});
 
 // Initialize the database schema
 export function initializeDatabase(): void {
   try {
-    log(`Initializing SQLite database at ${join(DATA_DIR, "invalid_records.sqlite")}...`);
-    
+    log(
+      `Initializing SQLite database at ${join(DATA_DIR, "invalid_records.sqlite")}...`,
+    );
+
     // Create table for invalid records if it doesn't exist
     db.run(`
       CREATE TABLE IF NOT EXISTS invalid_records (
@@ -31,19 +35,19 @@ export function initializeDatabase(): void {
         count INTEGER DEFAULT 1
       )
     `);
-    
+
     // Create index for faster lookups
     db.run(`
-      CREATE INDEX IF NOT EXISTS idx_monitor_type 
+      CREATE INDEX IF NOT EXISTS idx_monitor_type
       ON invalid_records(monitor_name, type)
     `);
-    
+
     log("Database initialized successfully", {
-      database_event: "init"
+      database_event: "init",
     });
   } catch (error) {
     err("Failed to initialize database", {
-      database_error: error
+      database_error: error,
     });
     throw error;
   }
@@ -51,62 +55,62 @@ export function initializeDatabase(): void {
 
 // Store an invalid record
 export function storeInvalidRecord(
-  type: string, 
-  errorMessage: string, 
-  monitorName?: string
+  type: string,
+  errorMessage: string,
+  monitorName?: string,
 ): void {
   const timestamp = new Date().toISOString();
-  
+
   try {
     // Check if this error already exists for this monitor and type
-    const existingRecord = db.query(`
-      SELECT id, count FROM invalid_records 
-      WHERE type = $type 
-        AND monitor_name = $monitorName 
-        AND error_message = $errorMessage
-    `).get({
-      $type: type,
-      $monitorName: monitorName || null,
-      $errorMessage: errorMessage
-    });
-    
+    const existingRecord = (db
+      .query(
+        `
+      SELECT id, count FROM invalid_records
+      WHERE type = ?
+        AND monitor_name = ?
+        AND error_message = ?
+    `,
+      )
+      .get(type, monitorName || null, errorMessage) as {
+      id?: number;
+      count?: number;
+    }) || { id: undefined, count: undefined };
+
     if (existingRecord) {
       // Update existing record
-      db.run(`
-        UPDATE invalid_records 
-        SET count = $count, last_seen = $timestamp 
+      db.run(
+        `
+        UPDATE invalid_records
+        SET count = $count, last_seen = $timestamp
         WHERE id = $id
-      `, {
-        $count: (existingRecord.count as number) + 1,
-        $timestamp: timestamp,
-        $id: existingRecord.id
-      });
+      `,
+        [(existingRecord.count || 0) + 1, timestamp, existingRecord.id || 0],
+      );
     } else {
       // Insert new record
-      db.run(`
+      db.run(
+        `
         INSERT INTO invalid_records (
           type, monitor_name, error_message, first_seen, last_seen
         ) VALUES (
           $type, $monitorName, $errorMessage, $timestamp, $timestamp
         )
-      `, {
-        $type: type,
-        $monitorName: monitorName || null,
-        $errorMessage: errorMessage,
-        $timestamp: timestamp
-      });
+      `,
+        [type, monitorName || null, errorMessage, timestamp],
+      );
     }
   } catch (error) {
     err("Error storing invalid record", {
-      database_error: error
+      database_error: error,
     });
     if (error instanceof Error) {
       err("Error details", {
         database_error_details: {
           message: error.message,
           stack: error.stack,
-          name: error.name
-        }
+          name: error.name,
+        },
       });
     }
   }
@@ -114,67 +118,77 @@ export function storeInvalidRecord(
 
 // Get all invalid records
 export function getAllInvalidRecords() {
-  return db.query(`
-    SELECT 
-      id, type, monitor_name, error_message, 
+  return db
+    .query(
+      `
+    SELECT
+      id, type, monitor_name, error_message,
       first_seen, last_seen, count
     FROM invalid_records
     ORDER BY last_seen DESC
-  `).all();
+  `,
+    )
+    .all();
 }
 
 // Get invalid records by type
 export function getInvalidRecordsByType(type: string) {
-  return db.query(`
-    SELECT 
-      id, type, monitor_name, error_message, 
+  return db
+    .query(
+      `
+    SELECT
+      id, type, monitor_name, error_message,
       first_seen, last_seen, count
     FROM invalid_records
-    WHERE type = $type
+    WHERE type = ?
     ORDER BY last_seen DESC
-  `).all({
-    $type: type
-  });
+  `,
+    )
+    .all(type);
 }
 
 // Get invalid records by monitor name
 export function getInvalidRecordsByMonitor(monitorName: string) {
-  return db.query(`
-    SELECT 
-      id, type, monitor_name, error_message, 
+  return db
+    .query(
+      `
+    SELECT
+      id, type, monitor_name, error_message,
       first_seen, last_seen, count
     FROM invalid_records
-    WHERE monitor_name = $monitorName
+    WHERE monitor_name = ?
     ORDER BY last_seen DESC
-  `).all({
-    $monitorName: monitorName
-  });
+  `,
+    )
+    .all(monitorName);
 }
 
 // Get summary of invalid records grouped by type
 export function getInvalidRecordsSummary() {
-  return db.query(`
-    SELECT 
-      type, 
+  return db
+    .query(
+      `
+    SELECT
+      type,
       COUNT(DISTINCT monitor_name) as monitor_count,
       SUM(count) as error_count,
       MAX(last_seen) as latest_error
     FROM invalid_records
     GROUP BY type
     ORDER BY latest_error DESC
-  `).all();
+  `,
+    )
+    .all();
 }
 
 // Delete a record by ID
 export function deleteInvalidRecord(id: number): boolean {
   try {
-    const result = db.run(`DELETE FROM invalid_records WHERE id = $id`, {
-      $id: id
-    });
+    const result = db.run(`DELETE FROM invalid_records WHERE id = ?`, [id]);
     return result.changes > 0;
   } catch (error) {
     err(`Error deleting invalid record with ID ${id}`, {
-      database_error: error
+      database_error: error,
     });
     return false;
   }

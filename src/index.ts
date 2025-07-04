@@ -1,8 +1,11 @@
 /* src/index.ts */
 
 // Initialize OpenTelemetry FIRST before any other imports
+console.log("Starting application - initializing OpenTelemetry");
 import { initializeOpenTelemetry } from "./instrumentation.js";
 const otelSdk = initializeOpenTelemetry();
+console.log("OpenTelemetry SDK initialized");
+console.log("OpenTelemetry initialized");
 
 import { Client, estypes } from "@elastic/elasticsearch";
 import { HttpConnection } from "@elastic/transport";
@@ -26,7 +29,7 @@ import {
   kafkaMessageSizeHistogram,
 } from "./metrics.js";
 import { initializeDatabase, closeDatabase } from "./database.js";
-import { startApiServer } from "./api.js";  // Using the updated API server with OpenTelemetry logging
+import { startApiServer } from "./api.js"; // Using the updated API server with OpenTelemetry logging
 import {
   getElasticsearchClient,
   executeSearch,
@@ -41,7 +44,9 @@ import {
 } from "./kafka.js";
 import { log, err, warn, debug } from "./utils/logger.js";
 
+console.log("Initializing metrics...");
 initializeMetrics();
+console.log("Metrics initialized");
 
 // Main function to extract and process monitor data
 async function extractAndProcessMonitors() {
@@ -56,7 +61,9 @@ async function extractAndProcessMonitors() {
     const isHealthy = await checkElasticsearchHealth();
 
     if (!isHealthy) {
-      err("❌ Elasticsearch connection failed - skipping this extraction cycle");
+      err(
+        "❌ Elasticsearch connection failed - skipping this extraction cycle",
+      );
       return;
     }
 
@@ -109,14 +116,14 @@ async function fetchAllMonitorData() {
         bool: {
           must: [
             {
-              "wildcard": {
+              wildcard: {
                 "monitor.name": monitorNameWildcard,
               },
             },
             // Only get monitors that have a summary
-            { "exists": { "field": "summary" } },
+            { exists: { field: "summary" } },
             {
-              "range": {
+              range: {
                 "@timestamp": {
                   gte: timeRange,
                 },
@@ -177,7 +184,7 @@ async function fetchAllMonitorData() {
         took: response.took,
         timed_out: response.timed_out,
         hits: response.hits.hits.length,
-      }
+      },
     });
 
     if (response.hits.hits.length === 0) {
@@ -190,7 +197,7 @@ async function fetchAllMonitorData() {
     }
 
     // Pass through raw hits without transformation
-    const rawHits = response.hits.hits.map(hit => ({ _source: hit._source }));
+    const rawHits = response.hits.hits.map((hit) => ({ _source: hit._source }));
 
     // Validate the Elasticsearch hits using the old validation method
     const validatedHits = await validateElasticsearchHits(rawHits);
@@ -198,34 +205,36 @@ async function fetchAllMonitorData() {
 
     // Count by dataset type
     const datasetCounts: Record<string, number> = {};
-    validatedHits.forEach(hit => {
+    validatedHits.forEach((hit) => {
       const dataset = hit._source.data_stream?.dataset || "unknown";
       datasetCounts[dataset] = (datasetCounts[dataset] || 0) + 1;
     });
     log("Hits by dataset type", {
-      dataset_counts: datasetCounts
+      dataset_counts: datasetCounts,
     });
 
     return validatedHits;
   } catch (error: any) {
     err(`Error fetching monitor data`, {
-      elasticsearch_error: error
+      elasticsearch_error: error,
     });
     if (error.meta?.body) {
       err("Elasticsearch response", {
-        elasticsearch_error_body: error.meta.body
+        elasticsearch_error_body: error.meta.body,
       });
     }
     if (error.meta?.statusCode) {
       err("Status code", {
-        elasticsearch_status_code: error.meta.statusCode
+        elasticsearch_status_code: error.meta.statusCode,
       });
     }
     return [];
   }
 }
 
-export function extractBusinessContext(source: ElasticsearchHit["_source"]): BusinessContext {
+export function extractBusinessContext(
+  source: ElasticsearchHit["_source"],
+): BusinessContext {
   const tags = source.tags || [];
   const missingFields: string[] = [];
   let domain = "unknown";
@@ -250,12 +259,15 @@ export function extractBusinessContext(source: ElasticsearchHit["_source"]): Bus
 
   if (domain === "unknown") missingFields.push("domain");
   if (department === "unknown") missingFields.push("department");
-  const hasCriticalityTag = tags.some(tag => tag.startsWith("criticality:"));
-  if (!hasCriticalityTag && criticality === "medium") missingFields.push("criticality");
+  const hasCriticalityTag = tags.some((tag) => tag.startsWith("criticality:"));
+  if (!hasCriticalityTag && criticality === "medium")
+    missingFields.push("criticality");
   if (environment === "unknown") missingFields.push("environment");
 
   if (missingFields.length > 0) {
-    throw new Error(`Missing business context fields: ${missingFields.join(", ")}`);
+    throw new Error(
+      `Missing business context fields: ${missingFields.join(", ")}`,
+    );
   }
 
   return {
@@ -267,61 +279,69 @@ export function extractBusinessContext(source: ElasticsearchHit["_source"]): Bus
 }
 
 // Transform monitor data with comprehensive field extraction
-async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<MonitorInfo[]> {
+async function transformMonitorData(
+  monitorData: ElasticsearchHit[],
+): Promise<MonitorInfo[]> {
   const transformedData: MonitorInfo[] = [];
   const errorsByMonitor: Record<string, Set<string>> = {};
 
   for (const hit of monitorData) {
     try {
       const businessContext = extractBusinessContext(hit._source);
-      
+
       // Only include HTTP if it has the required response structure
-      const httpData = hit._source.http?.response?.status_code 
+      const httpData = hit._source.http?.response?.status_code
         ? {
             response: {
               status_code: hit._source.http.response.status_code,
               mime_type: hit._source.http.response.mime_type,
               headers: hit._source.http.response.headers,
-              body: hit._source.http.response.body ? {
-                bytes: hit._source.http.response.body.bytes || 0,
-                content: hit._source.http.response.body.content || "",
-                hash: hit._source.http.response.body.hash || ""
-              } : undefined
+              body: hit._source.http.response.body
+                ? {
+                    bytes: hit._source.http.response.body.bytes || 0,
+                    content: hit._source.http.response.body.content || "",
+                    hash: hit._source.http.response.body.hash || "",
+                  }
+                : undefined,
             },
             ...(hit._source.http.rtt ? { rtt: hit._source.http.rtt } : {}),
-            ...(hit._source.http.state ? { 
-              state: typeof hit._source.http.state === 'string' 
-                ? hit._source.http.state 
-                : JSON.stringify(hit._source.http.state)
-            } : {})
+            ...(hit._source.http.state
+              ? {
+                  state:
+                    typeof hit._source.http.state === "string"
+                      ? hit._source.http.state
+                      : JSON.stringify(hit._source.http.state),
+                }
+              : {}),
           }
         : undefined;
-      
+
       // Fix the port type issue by ensuring it's a number
       const url = hit._source.url || {
         scheme: undefined,
         domain: undefined,
         port: undefined,
         path: undefined,
-        full: undefined
+        full: undefined,
       };
-      
+
       // Convert port to number if it's a string
-      if (url.port && typeof url.port === 'string') {
+      if (url.port && typeof url.port === "string") {
         url.port = parseInt(url.port, 10);
       }
-      
+
       // Only include data_stream if all required fields are present
-      const dataStream = hit._source.data_stream?.namespace && 
-                        hit._source.data_stream?.type && 
-                        hit._source.data_stream?.dataset
-        ? {
-            namespace: hit._source.data_stream.namespace,
-            type: hit._source.data_stream.type,
-            dataset: hit._source.data_stream.dataset
-          }
-        : undefined;
-      
+      const dataStream =
+        hit._source.data_stream?.namespace &&
+        hit._source.data_stream?.type &&
+        hit._source.data_stream?.dataset
+          ? {
+              namespace: hit._source.data_stream.namespace,
+              type: hit._source.data_stream.type,
+              dataset: hit._source.data_stream.dataset,
+            }
+          : undefined;
+
       const transformedMonitor: MonitorInfo = {
         id: hit._source.monitor.id,
         name: hit._source.monitor.name,
@@ -329,9 +349,9 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
         url: {
           scheme: url.scheme,
           domain: url.domain,
-          port: typeof url.port === 'number' ? url.port : undefined,
+          port: typeof url.port === "number" ? url.port : undefined,
           path: url.path,
-          full: url.full
+          full: url.full,
         },
         timestamp: hit._source["@timestamp"],
         businessContext,
@@ -347,54 +367,70 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
           timespan: hit._source.monitor.timespan,
           fleet_managed: hit._source.monitor.fleet_managed,
           check_group: hit._source.monitor.check_group,
-          project: hit._source.monitor.project
+          project: hit._source.monitor.project,
         },
         ...(httpData ? { http: httpData } : {}),
         ...(hit._source.tcp ? { tcp: hit._source.tcp } : {}),
         ...(hit._source.icmp ? { icmp: hit._source.icmp } : {}),
-        ...(hit._source.synthetics ? { synthetics: { type: hit._source.synthetics.type } } : {}),
-        ...(hit._source.summary ? { summary: {
-          retry_group: hit._source.summary.retry_group || "",
-          max_attempts: hit._source.summary.max_attempts || 0,
-          up: hit._source.summary.up || 0,
-          down: hit._source.summary.down || 0,
-          attempt: hit._source.summary.attempt || 0,
-          final_attempt: hit._source.summary.final_attempt || false,
-          status: hit._source.summary.status || ""
-        } } : {}),
-        ...(hit._source.state ? { state: {
-          duration_ms: hit._source.state.duration_ms || "",
-          checks: hit._source.state.checks || 0,
-          ends: hit._source.state.ends || null,
-          started_at: hit._source.state.started_at || "",
-          up: hit._source.state.up || 0,
-          id: hit._source.state.id || "",
-          down: hit._source.state.down || 0,
-          flap_history: hit._source.state.flap_history || [],
-          status: hit._source.state.status || ""
-        } } : {}),
-        ...(hit._source.event ? { event: {
-          agent_id_status: hit._source.event.agent_id_status,
-          ingested: hit._source.event.ingested,
-          type: hit._source.event.type,
-          dataset: hit._source.event.dataset
-        } } : {}),
+        ...(hit._source.synthetics
+          ? { synthetics: { type: hit._source.synthetics.type } }
+          : {}),
+        ...(hit._source.summary
+          ? {
+              summary: {
+                retry_group: hit._source.summary.retry_group || "",
+                max_attempts: hit._source.summary.max_attempts || 0,
+                up: hit._source.summary.up || 0,
+                down: hit._source.summary.down || 0,
+                attempt: hit._source.summary.attempt || 0,
+                final_attempt: hit._source.summary.final_attempt || false,
+                status: hit._source.summary.status || "",
+              },
+            }
+          : {}),
+        ...(hit._source.state
+          ? {
+              state: {
+                duration_ms: hit._source.state.duration_ms || "",
+                checks: hit._source.state.checks || 0,
+                ends: hit._source.state.ends || null,
+                started_at: hit._source.state.started_at || "",
+                up: hit._source.state.up || 0,
+                id: hit._source.state.id || "",
+                down: hit._source.state.down || 0,
+                flap_history: hit._source.state.flap_history || [],
+                status: hit._source.state.status || "",
+              },
+            }
+          : {}),
+        ...(hit._source.event
+          ? {
+              event: {
+                agent_id_status: hit._source.event.agent_id_status,
+                ingested: hit._source.event.ingested,
+                type: hit._source.event.type,
+                dataset: hit._source.event.dataset,
+              },
+            }
+          : {}),
         ...(dataStream ? { data_stream: dataStream } : {}),
-        ...(hit._source.ecs && hit._source.ecs.version ? { ecs: { version: hit._source.ecs.version } } : {}),
+        ...(hit._source.ecs && hit._source.ecs.version
+          ? { ecs: { version: hit._source.ecs.version } }
+          : {}),
         ...(hit._source.config_id ? { config_id: hit._source.config_id } : {}),
         ...(hit._source.agent &&
-            hit._source.agent.name &&
-            hit._source.agent.id &&
-            hit._source.agent.type &&
-            hit._source.agent.version
+        hit._source.agent.name &&
+        hit._source.agent.id &&
+        hit._source.agent.type &&
+        hit._source.agent.version
           ? {
               agent: {
                 name: hit._source.agent.name,
                 id: hit._source.agent.id,
                 type: hit._source.agent.type,
                 version: hit._source.agent.version,
-                ephemeral_id: hit._source.agent.ephemeral_id || ""
-              }
+                ephemeral_id: hit._source.agent.ephemeral_id || "",
+              },
             }
           : {}),
         ...(hit._source.observer && hit._source.observer.name
@@ -403,11 +439,11 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
                 name: hit._source.observer.name || "",
                 ...(hit._source.observer.geo && hit._source.observer.geo.name
                   ? { geo: { name: hit._source.observer.geo.name || "" } }
-                  : {})
-              }
+                  : {}),
+              },
             }
           : {}),
-        ...(hit._source.meta ? { meta: hit._source.meta } : {})
+        ...(hit._source.meta ? { meta: hit._source.meta } : {}),
       };
 
       transformedData.push(transformedMonitor);
@@ -416,16 +452,17 @@ async function transformMonitorData(monitorData: ElasticsearchHit[]): Promise<Mo
       if (!errorsByMonitor[monitorName]) {
         errorsByMonitor[monitorName] = new Set();
       }
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      errorsByMonitor[monitorName].add(errorMessage);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      errorsByMonitor[monitorName]?.add(errorMessage);
     }
   }
 
   // Write errors for each monitor separately
   for (const [monitorName, errorSet] of Object.entries(errorsByMonitor)) {
     if (errorSet.size > 0) {
-      const errors = Array.from(errorSet).map(message => ({ message }));
-      await writeInvalidRecords('monitor_transformation', errors, monitorName);
+      const errors = Array.from(errorSet).map((message) => ({ message }));
+      await writeInvalidRecords("monitor_transformation", errors, monitorName);
     }
   }
 
@@ -439,12 +476,17 @@ async function startExtractionProcess() {
   try {
     // Initialize database
     initializeDatabase();
-    
+
     // Start API server (combines metrics and invalid records API)
     log(`Starting API server on port ${config.metrics.port}...`);
+    console.log(
+      `Attempting to start API server on port ${config.metrics.port}`,
+    );
     const apiServer = startApiServer(config.metrics.port);
-    
+    console.log("API server started successfully");
+
     // Initial connection validation
+    console.log("Validating connections to Elasticsearch and Kafka");
     const connectionValidation = await validateConnections();
 
     if (!connectionValidation.valid) {
@@ -473,15 +515,13 @@ async function startExtractionProcess() {
 
     // Set up interval for regular extraction
     const intervalMinutes = config.extraction.intervalMinutes;
-    log(
-      `Setting up extraction to run every ${intervalMinutes} minute(s)`
-    );
+    log(`Setting up extraction to run every ${intervalMinutes} minute(s)`);
 
     // Store the interval ID so we can clear it if needed
     const intervalId = setInterval(
       async () => {
         log(
-          `\n🕒 Running scheduled extraction (every ${intervalMinutes} minutes)...`
+          `\n🕒 Running scheduled extraction (every ${intervalMinutes} minutes)...`,
         );
         try {
           await extractAndProcessMonitors();
@@ -490,11 +530,14 @@ async function startExtractionProcess() {
           err(`❌ Scheduled extraction failed:`, error);
         }
       },
-      intervalMinutes * 60 * 1000
+      intervalMinutes * 60 * 1000,
     );
 
     log(
-      `✅ Extraction interval set up successfully - will run every ${intervalMinutes} minute(s)`
+      `✅ Extraction interval set up successfully - will run every ${intervalMinutes} minute(s)`,
+    );
+    console.log(
+      `Extraction interval configured for ${intervalMinutes} minute(s)`,
     );
 
     // Clean up interval on process termination
@@ -503,6 +546,7 @@ async function startExtractionProcess() {
       clearInterval(intervalId);
     });
   } catch (error) {
+    console.error("ERROR in startExtractionProcess:", error);
     err("Failed to start extraction process:", error);
     throw error;
   }

@@ -96,12 +96,6 @@ const ApiConfigSchema = z.object({
     maxRequests: z.number().min(1).max(10000).default(100), // requests per window
     skipSuccessfulRequests: z.boolean().default(false),
     skipFailedRequests: z.boolean().default(false),
-  }).default({
-    enabled: false,
-    windowMs: 60000,
-    maxRequests: 100,
-    skipSuccessfulRequests: false,
-    skipFailedRequests: false,
   }),
 });
 
@@ -396,33 +390,72 @@ function loadConfigFromEnv(): Partial<Config> {
     prefix: getEnvConfig(envVarMapping.metrics.prefix, "string"),
     endpoint: getEnvConfig(envVarMapping.metrics.endpoint, "string"),
   };
-  
+
   // Load API config
   envConfig.api = {
     enabled: getEnvConfig(envVarMapping.api.enabled, "boolean"),
-    invalidRecordsEndpoint: getEnvConfig(envVarMapping.api.invalidRecordsEndpoint, "string"),
+    invalidRecordsEndpoint: getEnvConfig(
+      envVarMapping.api.invalidRecordsEndpoint,
+      "string",
+    ),
     uiEndpoint: getEnvConfig(envVarMapping.api.uiEndpoint, "string"),
     rateLimit: {
       enabled: getEnvConfig(envVarMapping.api.rateLimit.enabled, "boolean"),
       windowMs: getEnvConfig(envVarMapping.api.rateLimit.windowMs, "number"),
-      maxRequests: getEnvConfig(envVarMapping.api.rateLimit.maxRequests, "number"),
-      skipSuccessfulRequests: getEnvConfig(envVarMapping.api.rateLimit.skipSuccessfulRequests, "boolean"),
-      skipFailedRequests: getEnvConfig(envVarMapping.api.rateLimit.skipFailedRequests, "boolean"),
+      maxRequests: getEnvConfig(
+        envVarMapping.api.rateLimit.maxRequests,
+        "number",
+      ),
+      skipSuccessfulRequests: getEnvConfig(
+        envVarMapping.api.rateLimit.skipSuccessfulRequests,
+        "boolean",
+      ),
+      skipFailedRequests: getEnvConfig(
+        envVarMapping.api.rateLimit.skipFailedRequests,
+        "boolean",
+      ),
     },
   };
 
   // Load OpenTelemetry config
   envConfig.openTelemetry = {
     enabled: getEnvConfig(envVarMapping.openTelemetry.enabled, "boolean"),
-    tracesEndpoint: getEnvConfig(envVarMapping.openTelemetry.tracesEndpoint, "string"),
-    metricsEndpoint: getEnvConfig(envVarMapping.openTelemetry.metricsEndpoint, "string"),
-    logsEndpoint: getEnvConfig(envVarMapping.openTelemetry.logsEndpoint, "string"),
-    serviceName: getEnvConfig(envVarMapping.openTelemetry.serviceName, "string"),
-    serviceVersion: getEnvConfig(envVarMapping.openTelemetry.serviceVersion, "string"),
-    deploymentEnvironment: getEnvConfig(envVarMapping.openTelemetry.deploymentEnvironment, "string"),
-    metricIntervalMs: getEnvConfig(envVarMapping.openTelemetry.metricIntervalMs, "number"),
-    metricReaderInterval: getEnvConfig(envVarMapping.openTelemetry.metricReaderInterval, "number"),
-    summaryLogInterval: getEnvConfig(envVarMapping.openTelemetry.summaryLogInterval, "number"),
+    tracesEndpoint: getEnvConfig(
+      envVarMapping.openTelemetry.tracesEndpoint,
+      "string",
+    ),
+    metricsEndpoint: getEnvConfig(
+      envVarMapping.openTelemetry.metricsEndpoint,
+      "string",
+    ),
+    logsEndpoint: getEnvConfig(
+      envVarMapping.openTelemetry.logsEndpoint,
+      "string",
+    ),
+    serviceName: getEnvConfig(
+      envVarMapping.openTelemetry.serviceName,
+      "string",
+    ),
+    serviceVersion: getEnvConfig(
+      envVarMapping.openTelemetry.serviceVersion,
+      "string",
+    ),
+    deploymentEnvironment: getEnvConfig(
+      envVarMapping.openTelemetry.deploymentEnvironment,
+      "string",
+    ),
+    metricIntervalMs: getEnvConfig(
+      envVarMapping.openTelemetry.metricIntervalMs,
+      "number",
+    ),
+    metricReaderInterval: getEnvConfig(
+      envVarMapping.openTelemetry.metricReaderInterval,
+      "number",
+    ),
+    summaryLogInterval: getEnvConfig(
+      envVarMapping.openTelemetry.summaryLogInterval,
+      "number",
+    ),
   };
 
   // Load NodeEnv
@@ -439,7 +472,10 @@ function loadConfigFromEnv(): Partial<Config> {
     logging: { ...defaultConfig.logging, ...envConfig.logging },
     metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
     api: { ...defaultConfig.api, ...envConfig.api },
-    openTelemetry: { ...defaultConfig.openTelemetry, ...envConfig.openTelemetry },
+    openTelemetry: {
+      ...defaultConfig.openTelemetry,
+      ...envConfig.openTelemetry,
+    },
     nodeEnv: envConfig.nodeEnv || defaultConfig.nodeEnv,
   });
 
@@ -559,8 +595,11 @@ try {
     extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
     logging: { ...defaultConfig.logging, ...envConfig.logging },
     metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
-    api: { ...defaultConfig.api, ...envConfig.api },  // Include api configuration
-    openTelemetry: { ...defaultConfig.openTelemetry, ...envConfig.openTelemetry },
+    api: { ...defaultConfig.api, ...envConfig.api }, // Include api configuration
+    openTelemetry: {
+      ...defaultConfig.openTelemetry,
+      ...envConfig.openTelemetry,
+    },
     nodeEnv: envConfig.nodeEnv || defaultConfig.nodeEnv,
   };
 
@@ -570,52 +609,56 @@ try {
     config.nodeEnv === "development" ||
     getEnvValue("LOG_CONFIG") === "true"
   ) {
-    log(`✅ Configuration loaded successfully: ${JSON.stringify({
-      elasticsearch: {
-        node: config.elasticsearch.node,
-        hasApiKey: !!config.elasticsearch.apiKey,
-        maxRetries: config.elasticsearch.maxRetries,
-        requestTimeout: config.elasticsearch.requestTimeout,
-      },
-      kafka: {
-        clientId: config.kafka.clientId,
-        brokers: config.kafka.brokers,
-        ssl: config.kafka.ssl,
-        hasAuth: !!config.kafka.username,
-        topicName: config.kafka.topicName,
-      },
-      extraction: {
-        intervalMinutes: config.extraction.intervalMinutes,
-        timeRange: config.extraction.timeRange,
-        indexPattern: config.extraction.indexPattern,
-      },
-      logging: {
-        level: config.logging.level,
-        format: config.logging.format,
-      },
-      metrics: {
-        enabled: config.metrics.enabled,
-        port: config.metrics.port,
-        prefix: config.metrics.prefix,
-      },
-      api: {
-        enabled: config.api.enabled,
-        invalidRecordsEndpoint: config.api.invalidRecordsEndpoint,
-        uiEndpoint: config.api.uiEndpoint,
-      },
-      openTelemetry: {
-        enabled: config.openTelemetry.enabled,
-        tracesEndpoint: config.openTelemetry.tracesEndpoint,
-        metricsEndpoint: config.openTelemetry.metricsEndpoint,
-        logsEndpoint: config.openTelemetry.logsEndpoint,
-        serviceName: config.openTelemetry.serviceName,
-        metricIntervalMs: config.openTelemetry.metricIntervalMs,
-      },
-      nodeEnv: config.nodeEnv,
-    })}`);
+    log(
+      `✅ Configuration loaded successfully: ${JSON.stringify({
+        elasticsearch: {
+          node: config.elasticsearch.node,
+          hasApiKey: !!config.elasticsearch.apiKey,
+          maxRetries: config.elasticsearch.maxRetries,
+          requestTimeout: config.elasticsearch.requestTimeout,
+        },
+        kafka: {
+          clientId: config.kafka.clientId,
+          brokers: config.kafka.brokers,
+          ssl: config.kafka.ssl,
+          hasAuth: !!config.kafka.username,
+          topicName: config.kafka.topicName,
+        },
+        extraction: {
+          intervalMinutes: config.extraction.intervalMinutes,
+          timeRange: config.extraction.timeRange,
+          indexPattern: config.extraction.indexPattern,
+        },
+        logging: {
+          level: config.logging.level,
+          format: config.logging.format,
+        },
+        metrics: {
+          enabled: config.metrics.enabled,
+          port: config.metrics.port,
+          prefix: config.metrics.prefix,
+        },
+        api: {
+          enabled: config.api.enabled,
+          invalidRecordsEndpoint: config.api.invalidRecordsEndpoint,
+          uiEndpoint: config.api.uiEndpoint,
+        },
+        openTelemetry: {
+          enabled: config.openTelemetry.enabled,
+          tracesEndpoint: config.openTelemetry.tracesEndpoint,
+          metricsEndpoint: config.openTelemetry.metricsEndpoint,
+          logsEndpoint: config.openTelemetry.logsEndpoint,
+          serviceName: config.openTelemetry.serviceName,
+          metricIntervalMs: config.openTelemetry.metricIntervalMs,
+        },
+        nodeEnv: config.nodeEnv,
+      })}`,
+    );
   }
 } catch (error) {
-  err(`💥 Configuration validation failed: ${error instanceof Error ? error.message : String(error)}`);
+  err(
+    `💥 Configuration validation failed: ${error instanceof Error ? error.message : String(error)}`,
+  );
   throw new Error(
     "Invalid configuration: " +
       (error instanceof Error ? error.message : String(error)),
@@ -641,7 +684,9 @@ export function getConfigDocumentation(): Record<string, any> {
       logging: LoggingConfigSchema.describe("Logging configuration"),
       metrics: MetricsConfigSchema.describe("Metrics configuration"),
       api: ApiConfigSchema.describe("API and UI configuration"),
-      openTelemetry: OpenTelemetryConfigSchema.describe("OpenTelemetry configuration"),
+      openTelemetry: OpenTelemetryConfigSchema.describe(
+        "OpenTelemetry configuration",
+      ),
     },
   };
 }

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "bun run --watch src/index.ts",
     "dev": "bun run --watch src/index.ts",
-    "build": "bun build src/index.ts --outdir dist",
+    "build": "bun build src/index.ts --outdir dist --target bun",
     "docker:build": "docker build -t synthetics-monitor-extractor .",
     "docker:run": "docker run -p 3001:3001 synthetics-monitor-extractor",
     "security:scan": "snyk test --severity-threshold=high",
@@ -17,7 +17,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.0.6",
-    "@types/bun": "^1.2.17"
+    "@types/bun": "^1.2.17",
+    "@types/hapi__catbox": "^12.1.0",
+    "@types/hapi__shot": "^6.0.0"
   },
   "peerDependencies": {
     "typescript": "^5.8.3"
