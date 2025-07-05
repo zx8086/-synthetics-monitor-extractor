@@ -570,10 +570,35 @@ function loadConfigFromEnv(): Partial<Config> {
       ...envConfig.elasticsearch,
     },
     kafka: { ...defaultConfig.kafka, ...envConfig.kafka },
-    extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
-    logging: { ...defaultConfig.logging, ...envConfig.logging },
+    extraction: {
+      ...defaultConfig.extraction,
+      ...envConfig.extraction,
+      batchProcessing: {
+        ...defaultConfig.extraction.batchProcessing,
+        ...(envConfig.extraction?.batchProcessing || {}),
+      },
+    },
+    logging: {
+      ...defaultConfig.logging,
+      ...envConfig.logging,
+      console: {
+        ...defaultConfig.logging.console,
+        ...(envConfig.logging?.console || {}),
+      },
+      opentelemetry: {
+        ...defaultConfig.logging.opentelemetry,
+        ...(envConfig.logging?.opentelemetry || {}),
+      },
+    },
     metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
-    api: { ...defaultConfig.api, ...envConfig.api },
+    api: {
+      ...defaultConfig.api,
+      ...envConfig.api,
+      rateLimit: {
+        ...defaultConfig.api.rateLimit,
+        ...(envConfig.api?.rateLimit || {}),
+      },
+    },
     openTelemetry: {
       ...defaultConfig.openTelemetry,
       ...envConfig.openTelemetry,
@@ -699,10 +724,35 @@ try {
       ...envConfig.elasticsearch,
     },
     kafka: { ...defaultConfig.kafka, ...envConfig.kafka },
-    extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
-    logging: { ...defaultConfig.logging, ...envConfig.logging },
+    extraction: {
+      ...defaultConfig.extraction,
+      ...envConfig.extraction,
+      batchProcessing: {
+        ...defaultConfig.extraction.batchProcessing,
+        ...(envConfig.extraction?.batchProcessing || {}),
+      },
+    },
+    logging: {
+      ...defaultConfig.logging,
+      ...envConfig.logging,
+      console: {
+        ...defaultConfig.logging.console,
+        ...(envConfig.logging?.console || {}),
+      },
+      opentelemetry: {
+        ...defaultConfig.logging.opentelemetry,
+        ...(envConfig.logging?.opentelemetry || {}),
+      },
+    },
     metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
-    api: { ...defaultConfig.api, ...envConfig.api }, // Include api configuration
+    api: {
+      ...defaultConfig.api,
+      ...envConfig.api,
+      rateLimit: {
+        ...defaultConfig.api.rateLimit,
+        ...(envConfig.api?.rateLimit || {}),
+      },
+    },
     openTelemetry: {
       ...defaultConfig.openTelemetry,
       ...envConfig.openTelemetry,
