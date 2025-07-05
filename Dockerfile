@@ -1,15 +1,18 @@
 # syntax=docker/dockerfile:1.4
 
 # Base stage - Use the latest stable version instead of canary for better security
-FROM oven/bun:1.2.14-alpine AS base
+FROM oven/bun:1.2.16-alpine AS base
 
 # Update Alpine packages to fix security vulnerabilities
 RUN apk update && \
     apk upgrade --no-cache && \
     apk add --no-cache \
     curl \
-    ca-certificates && \
-    rm -rf /var/cache/apk/*
+    ca-certificates \
+    dumb-init \
+    && rm -rf /var/cache/apk/* \
+    && addgroup -g 1001 -S nodejs \
+    && adduser -S bun -u 1001 -G nodejs
 
 # Set common environment variables
 ENV CN_ROOT=/usr/src/app \
@@ -148,4 +151,5 @@ EXPOSE 9090/tcp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:9090/health || exit 1
 
+ENTRYPOINT ["dumb-init", "--"]
 CMD ["bun", "run", "dist/index.js"]

@@ -119,7 +119,6 @@ jobs:
           sbom: true
           provenance: true
 
-
       - name: Wait for image to be available
         if: github.event_name != 'pull_request'
         run: |
@@ -156,17 +155,16 @@ jobs:
           path: sbom.spdx.json
         continue-on-error: true
 
-
       - name: Test container health
         if: github.event_name != 'pull_request'
         run: |
           # Get the runner's architecture
           RUNNER_ARCH=$(uname -m)
-          
+
           # Stop existing containers using port 9090
           docker ps -q --filter publish=9090 | xargs -r docker stop || true
           docker rm -f synthetics-monitor-test 2>/dev/null || true
-          
+
           # Run container (will automatically use correct architecture)
           # Use the first tag from metadata output (tags are newline-separated)
           IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
@@ -180,7 +178,7 @@ jobs:
             -e BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             -e LOG_LEVEL=info \
             "${IMAGE_TAG}"
-          
+
           # Add delay and better error handling
           sleep 15
           if ! docker ps | grep -q synthetics-monitor-test; then
@@ -192,20 +190,20 @@ jobs:
           # Test health endpoint
           echo "Testing health endpoint..."
           curl -f http://localhost:9090/health || echo "Health endpoint test failed"
-          
+
           # Test metrics endpoint
           echo "Testing metrics endpoint..."
           curl -f http://localhost:9090/metrics || echo "Metrics endpoint test failed"
-          
+
           # Test API endpoints
           echo "Testing API endpoints..."
           curl -f http://localhost:9090/api/invalid-records || echo "API endpoint test failed"
-          
+
           # Capture metrics
           CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' synthetics-monitor-test)
           echo "CONTAINER_STATUS=${CONTAINER_STATUS}" >> $GITHUB_ENV
           echo "CONTAINER_START_TIME=$(docker inspect --format='{{.State.StartedAt}}' synthetics-monitor-test)" >> $GITHUB_ENV
-          
+
           # Show container logs for debugging
           echo "Container logs:"
           docker logs synthetics-monitor-test --tail 50
@@ -225,7 +223,7 @@ jobs:
             --severity-threshold=high \
             --sarif-file-output=snyk-container.sarif \
             --json > snyk-container-report.json || echo "Container vulnerabilities found but continuing..."
-            
+
           # Monitor on master branch
           if [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
             snyk container monitor "${FULL_IMAGE_TAG}" \
@@ -246,13 +244,13 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           mkdir -p sbom-output
-          
+
           # Generate multiple SBOM formats
           echo "Generating SBOM files..."
           # Get the first tag from metadata (tags are newline-separated)
           IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
           echo "Scanning image: ${IMAGE_TAG}"
-          
+
           # Check if we just built this image locally
           if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "${IMAGE_TAG#*/}"; then
             echo "Using locally built image for SBOM generation..."
@@ -273,7 +271,7 @@ jobs:
               echo "This is expected if the platform-specific image hasn't been pushed yet"
             fi
           fi
-          
+
           # List generated files
           echo "Generated SBOM files:"
           ls -la sbom-output/ || true
@@ -295,18 +293,18 @@ jobs:
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           RESULTS_DIR="attestation-results-${TIMESTAMP}"
           echo "ATTESTATION_RESULTS_DIR=${RESULTS_DIR}" >> $GITHUB_ENV
-          
+
           mkdir -p "${RESULTS_DIR}"
-          
+
           # Get image digest and reference
           echo "Getting image digest..."
           # Get the first tag from metadata (tags are newline-separated)
           IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
           IMAGE_REF="${IMAGE_TAG}"
-          
+
           # Try multiple methods to get the digest
           echo "Trying to get image digest for: ${IMAGE_REF}"
-          
+
           # Method 1: Use build output digest if available
           if [ -n "${{ steps.build.outputs.digest }}" ]; then
             IMAGE_DIGEST="${{ steps.build.outputs.digest }}"
@@ -315,18 +313,18 @@ jobs:
             # Method 2: Try docker buildx imagetools inspect
             echo "Trying docker buildx imagetools inspect..."
             IMAGE_DIGEST=$(docker buildx imagetools inspect "${IMAGE_REF}" --raw 2>/dev/null | jq -r '.manifests[]? | select(.platform.architecture == "${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}") | .digest' 2>/dev/null || echo "")
-            
+
             if [ -z "$IMAGE_DIGEST" ]; then
               # Method 3: Try to get any manifest digest
               IMAGE_DIGEST=$(docker buildx imagetools inspect "${IMAGE_REF}" --raw 2>/dev/null | jq -r '.manifests[0].digest' 2>/dev/null || echo "")
             fi
-            
+
             if [ -z "$IMAGE_DIGEST" ]; then
               # Method 4: Try docker manifest inspect as fallback
               IMAGE_DIGEST=$(docker manifest inspect "${IMAGE_REF}" 2>/dev/null | jq -r '.config.digest' 2>/dev/null || echo "")
             fi
           fi
-          
+
           if [ -n "$IMAGE_DIGEST" ] && [ "$IMAGE_DIGEST" != "null" ] && [ "$IMAGE_DIGEST" != "" ]; then
             IMAGE_WITH_DIGEST="${IMAGE_REF}@${IMAGE_DIGEST}"
             echo "Image reference: ${IMAGE_REF}"
@@ -340,14 +338,14 @@ jobs:
             # Extract from manifest and save all data
             echo "Extracting from manifest..."
             docker buildx imagetools inspect "${IMAGE_WITH_DIGEST}" --raw > "${RESULTS_DIR}/manifest.json" 2>/dev/null || true
-            
+
             # Also save the raw manifest for the tag
             docker buildx imagetools inspect "${IMAGE_REF}" --raw > "${RESULTS_DIR}/manifest-tag.json" 2>/dev/null || true
           else
             echo "Could not get image digest, skipping attestation verification"
             echo "This may be expected for multi-platform builds or if the image hasn't been pushed yet"
           fi
-          
+
           # Generate comprehensive report
           {
             echo "### 📝 Attestation Verification Report"
@@ -384,34 +382,6 @@ jobs:
           retention-days: 90
         continue-on-error: true
 
-      # - name: Sign image with cosign
-      #   uses: sigstore/cosign-installer@v3
-      #   if: github.event_name != 'pull_request'
-
-      # - name: Sign the published Docker image
-      #   if: github.event_name != 'pull_request'
-      #   env:
-      #     COSIGN_EXPERIMENTAL: 1
-      #   run: |
-      #     echo "${{ steps.meta.outputs.tags }}" | xargs -I {} cosign sign --yes {}@${{ steps.build.outputs.digest }}
-      #   continue-on-error: true
-
-      # - name: Run Trivy vulnerability scanner
-      #   uses: aquasecurity/trivy-action@master
-      #   if: github.event_name != 'pull_request'
-      #   with:
-      #     image-ref: zx8086/synthetics-monitor-extractor:${{ github.sha }}
-      #     format: sarif
-      #     output: trivy-results.sarif
-      #   continue-on-error: true
-
-      # - name: Upload Trivy scan results to GitHub Security tab
-      #   uses: github/codeql-action/upload-sarif@v3
-      #   if: github.event_name != 'pull_request'
-      #   with:
-      #     sarif_file: trivy-results.sarif
-      #   continue-on-error: true
-
       - name: Docker Build Summary
         if: always()
         run: |
@@ -425,7 +395,7 @@ jobs:
             echo "| 📦 Image | synthetics-monitor-extractor |"
             echo "| 🏗️ Platform | ${{ matrix.platform }} |"
             echo "| ⚡ Status | ${CONTAINER_STATUS:-N/A} |"
-            
+
             # Container Status
             if [ "${CONTAINER_STATUS:-}" = "running" ]; then
               echo "| 🔄 Status | ✅ Running |"
@@ -433,45 +403,45 @@ jobs:
             else
               echo "| 🔄 Status | ⚠️ Not Running |"
             fi
-            
+
             echo ""
             echo "#### 🔒 Security Scanning"
             echo "| Scan Type | Status |"
             echo "|-----------|--------|"
-            
+
             # Container scan status
             if [ -f "snyk-container.sarif" ]; then
               echo "| 📦 Container Scan | ✅ Completed |"
             else
               echo "| 📦 Container Scan | ⚠️ Failed |"
             fi
-            
+
             echo ""
             echo "ℹ️ Additional security scans run in separate workflow"
-            
+
             echo ""
             echo "#### 📋 Supply Chain Security"
             echo "| Component | Status |"
             echo "|-----------|--------|"
-            
+
             if [ -d "sbom-output" ] && [ "$(ls -A sbom-output)" ]; then
               echo "| 📄 SBOM Generation | ✅ Completed |"
             else
               echo "| 📄 SBOM Generation | ⚠️ Failed |"
             fi
-            
+
             if [ -d "${{ env.ATTESTATION_RESULTS_DIR }}" ] && [ "$(ls -A ${{ env.ATTESTATION_RESULTS_DIR }})" ]; then
               echo "| 🔐 Attestation Verification | ✅ Completed |"
             else
               echo "| 🔐 Attestation Verification | ⚠️ Failed |"
             fi
-            
+
             echo ""
             echo "#### 🔗 Useful Links"
             echo "- [Security Tab](https://github.com/${{ github.repository }}/security)"
             echo "- [Actions Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
             echo "- [Docker Hub](https://hub.docker.com/r/zx8086/synthetics-monitor-extractor)"
-            
+
           } >> $GITHUB_STEP_SUMMARY
         continue-on-error: true
 
@@ -479,25 +449,25 @@ jobs:
         if: always()
         run: |
           echo "Starting cleanup process..."
-          
+
           # Remove test containers
           docker container rm -f synthetics-monitor-test 2>/dev/null || true
-          
+
           # Clean up temporary files
           rm -rf sbom-output/ || true
           rm -rf "${{ env.ATTESTATION_RESULTS_DIR }}" || true
           rm -f snyk-container.sarif || true
           rm -f sbom.spdx.json || true
-          
+
           # Docker cleanup
           docker image prune -f --filter "until=24h" || true
           docker volume prune -f || true
           docker builder prune -f --filter "until=24h" || true
-          
+
           # Remove verification tools
           rm -rf "${GITHUB_WORKSPACE}/bin" || true
           rm -rf ~/.sigstore || true
-          
+
           echo "Cleanup completed successfully"
         continue-on-error: true
 

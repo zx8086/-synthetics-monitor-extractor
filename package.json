@@ -18,13 +18,12 @@
     "security:code:sarif": "snyk code test --severity-threshold=high --sarif-file-output=snyk-code-results.sarif || true",
     "security:full": "bun run security:scan && bun run security:code && bun run security:scan:sarif && bun run security:code:sarif",
     "security:check": "bash scripts/security-check.sh",
-    "security:fix": "bash scripts/fix-vulnerabilities.sh",
     "lint": "biome check ./src",
     "format": "biome format --write ./src",
     "health": "curl -f http://localhost:9090/metrics || exit 1"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.0.6",
+    "@biomejs/biome": "^1.9.4",
     "@types/bun": "^1.2.18",
     "@types/hapi__catbox": "^12.1.0",
     "@types/hapi__shot": "^6.0.0"
@@ -62,6 +61,16 @@
   ],
   "overrides": {
     "lodash": "^4.17.21",
-    "inquirer": "^9.2.15"
+    "inquirer": "^9.2.15",
+    "semver": "^7.6.0",
+    "braces": "^3.0.3",
+    "micromatch": "^4.0.8",
+    "minimatch": "^9.0.5",
+    "glob": "^11.0.0",
+    "path-to-regexp": "^8.2.0",
+    "cookie": "^0.7.0",
+    "axios": "^1.7.7",
+    "jsonwebtoken": "^9.0.2",
+    "express": "^4.21.1"
   }
 }
