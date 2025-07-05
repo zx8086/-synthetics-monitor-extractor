@@ -38,7 +38,7 @@ const ElasticsearchConfigSchema = z
 const KafkaConfigSchema = z
 	.object({
 		clientId: z.string().min(1).default("synthetics-extractor"),
-		brokers: z.array(z.string().min(1)).min(1),
+		brokers: z.array(z.string().min(1)).min(1).default(["localhost:9092"]),
 		ssl: z.boolean().default(false),
 		username: z.string().optional(),
 		password: z.string().optional(),
@@ -495,14 +495,17 @@ export function validateEnvironment(): {
 	errors: string[];
 	warnings?: string[];
 } {
-	const requiredVars = ["ELASTIC_NODE", "KAFKA_BROKERS"];
 	const errors: string[] = [];
 	const warnings: string[] = [];
-
-	for (const varName of requiredVars) {
-		if (!getEnvValue(varName)) {
-			errors.push(`Missing required environment variable: ${varName}`);
-		}
+	
+	// These variables have defaults in the schema, so they're not strictly required
+	// We'll just warn if they're not set
+	if (!getEnvValue("ELASTIC_NODE")) {
+		warnings.push("ELASTIC_NODE not set, using default: https://elasticsearch:9200");
+	}
+	
+	if (!getEnvValue("KAFKA_BROKERS")) {
+		warnings.push("KAFKA_BROKERS not set, using default: localhost:9092");
 	}
 
 	if (getEnvValue("ELASTIC_NODE")) {
