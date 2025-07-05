@@ -57,10 +57,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          driver: cloud
-          endpoint: ${{ matrix.platform == 'linux/amd64' && 'cloud://zx8086/cldbuild_linux-amd64' || 'cloud://zx8086/cldbuild_linux-arm64' }}
-          use: true
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4
@@ -98,6 +94,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          builder: ${{ matrix.platform == 'linux/amd64' && 'zx8086/cldbuild_linux-amd64' || 'zx8086/cldbuild_linux-arm64' }}
           build-args: |
             BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
             BUILD_VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
