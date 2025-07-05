@@ -53,6 +53,7 @@ RUN --mount=type=cache,target=/usr/src/app/.build \
     --sourcemap \
     --external dns \
     --external bun \
+    --external @platformatic/kafka \
     --manifest && \
     find dist -name "*.map" -exec mv {} dist/maps/ \; || true
 
@@ -75,6 +76,7 @@ RUN set -e && \
     --sourcemap \
     --external dns \
     --external bun \
+    --external @platformatic/kafka \
     --manifest && \
     mkdir -p /usr/src/app/dist/maps && \
     find /usr/src/app/dist -name "*.map" -exec mv {} /usr/src/app/dist/maps/ \; || true && \

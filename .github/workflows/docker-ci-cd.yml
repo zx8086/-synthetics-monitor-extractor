@@ -268,15 +268,25 @@ jobs:
           IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
           echo "Scanning image: ${IMAGE_TAG}"
           
-          # Try to pull the image first to ensure it's available
-          if docker pull "${IMAGE_TAG}"; then
-            echo "Image pulled successfully, generating SBOM..."
+          # Check if we just built this image locally
+          if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "${IMAGE_TAG#*/}"; then
+            echo "Using locally built image for SBOM generation..."
             "${GITHUB_WORKSPACE}/bin/syft" "${IMAGE_TAG}" \
               -o json=sbom-output/syft-sbom.json \
               -o spdx-json=sbom-output/spdx-sbom.json \
               -o cyclonedx-json=sbom-output/cyclonedx-sbom.json || echo "SBOM generation failed but continuing..."
           else
-            echo "Failed to pull image ${IMAGE_TAG}, SBOM generation skipped"
+            # Try to pull the image if not available locally
+            if docker pull "${IMAGE_TAG}"; then
+              echo "Image pulled successfully, generating SBOM..."
+              "${GITHUB_WORKSPACE}/bin/syft" "${IMAGE_TAG}" \
+                -o json=sbom-output/syft-sbom.json \
+                -o spdx-json=sbom-output/spdx-sbom.json \
+                -o cyclonedx-json=sbom-output/cyclonedx-sbom.json || echo "SBOM generation failed but continuing..."
+            else
+              echo "Warning: Failed to pull image ${IMAGE_TAG}, SBOM generation skipped"
+              echo "This is expected if the platform-specific image hasn't been pushed yet"
+            fi
           fi
           
           # List generated files
