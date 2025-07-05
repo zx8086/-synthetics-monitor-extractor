@@ -167,7 +167,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: github.event_name != 'pull_request'
         with:
-          name: anchore-sbom-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          name: anchore-sbom-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}-${{ github.run_id }}
           path: sbom.spdx.json
         continue-on-error: true
 
@@ -298,7 +298,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: comprehensive-sbom-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          name: comprehensive-sbom-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}-${{ github.run_id }}
           path: sbom-output/
           retention-days: 90
         continue-on-error: true

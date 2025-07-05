@@ -467,11 +467,31 @@ export function startApiServer(port: number = config.metrics.port): Server {
 							});
 						}
 						return response;
+					} else if (url.pathname === "/health") {
+						const response = Response.json(
+							{
+								status: "healthy",
+								timestamp: new Date().toISOString(),
+								service: "synthetics-monitor-extractor",
+								version: process.env.BUILD_VERSION || "unknown",
+							},
+							{ headers },
+						);
+						recordHttpResponseTime(performance.now() - startTime, route, 200);
+						const span = trace.getActiveSpan();
+						if (span) {
+							span.setAttributes({
+								"http.status_code": 200,
+								"api.endpoint_type": "health",
+							});
+						}
+						return response;
 					} else if (url.pathname === "/" || url.pathname === "/api") {
 						const response = Response.json(
 							{
 								message: "Synthetic Monitors API",
 								endpoints: [
+									"/health",
 									config.api.invalidRecordsEndpoint,
 									`${config.api.invalidRecordsEndpoint}?type=monitor_transformation`,
 									`${config.api.invalidRecordsEndpoint}?monitor=monitor_name`,
