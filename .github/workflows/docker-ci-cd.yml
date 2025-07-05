@@ -94,7 +94,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          builder: ${{ matrix.platform == 'linux/amd64' && 'zx8086/cldbuild_linux-amd64' || 'zx8086/cldbuild_linux-arm64' }}
+          builder: zx8086/cldbuild
           build-args: |
             BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
             BUILD_VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
