@@ -20,7 +20,7 @@ ENV CN_ROOT=/usr/src/app \
 WORKDIR /usr/src/app
 
 # Create directories
-RUN mkdir -p /usr/src/app/logs /usr/src/app/deps/cache /usr/src/app/.sourcemaps && \
+RUN mkdir -p /usr/src/app/logs /usr/src/app/deps/cache /usr/src/app/.sourcemaps /usr/src/app/config && \
     chown -R bun:bun /usr/src/app
 
 # Dependencies stage - Optimized for caching
@@ -84,6 +84,7 @@ COPY --from=builder --chown=bun:bun /usr/src/app/dist ./dist
 # Copy only necessary source files for runtime
 COPY --chown=bun:bun src/ ./src/
 COPY --chown=bun:bun tsconfig.json ./
+COPY --chown=bun:bun config/ ./config/
 
 # Create required directories
 RUN mkdir -p /usr/src/app/data /usr/src/app/logs && \

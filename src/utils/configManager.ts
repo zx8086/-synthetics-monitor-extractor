@@ -90,13 +90,39 @@ export class ConfigManager {
 			// Try to load initial config from file
 			await this.loadConfigFromFile();
 		} catch (error) {
-			warn("No existing config file found, using defaults", {
-				config_file_error:
-					error instanceof Error ? error.message : String(error),
+			log("No existing config file found, using defaults", {
+				config_file_info: this.configFilePath,
+				note: "Hot-reload config file is optional",
 			});
 		}
 
+		// Only try to watch if the file exists or if we're in development
+		const isDevelopment = process.env.NODE_ENV === "development";
+		if (!isDevelopment) {
+			log("Skipping config file watching in production mode", {
+				config_manager: {
+					mode: "production",
+					configFile: this.configFilePath,
+				},
+			});
+			return;
+		}
+
 		try {
+			// Check if the config directory exists, create it if in development
+			const { dirname } = await import("node:path");
+			const { mkdir, access } = await import("node:fs/promises");
+			const configDir = dirname(this.configFilePath);
+			
+			try {
+				await access(configDir);
+			} catch {
+				if (isDevelopment) {
+					await mkdir(configDir, { recursive: true });
+					log("Created config directory for development", { dir: configDir });
+				}
+			}
+
 			const watcher = watch(
 				this.configFilePath,
 				{ persistent: false },
@@ -120,9 +146,9 @@ export class ConfigManager {
 				},
 			});
 		} catch (error) {
-			warn("Failed to start watching config file", {
-				config_watch_error:
-					error instanceof Error ? error.message : String(error),
+			log("Config file watching disabled", {
+				config_watch_info: "Hot-reload is optional and disabled in production",
+				reason: error instanceof Error ? error.message : String(error),
 			});
 		}
 	}
@@ -170,6 +196,12 @@ export class ConfigManager {
 				},
 			});
 		} catch (error) {
+			// Check if it's just a file not found error (which is expected)
+			if (error instanceof Error && error.message.includes('ENOENT')) {
+				// Don't log as error for file not found - this is expected
+				throw error;
+			}
+			
 			err("Failed to load configuration from file", {
 				config_load_error: {
 					file: this.configFilePath,
