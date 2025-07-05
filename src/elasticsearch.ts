@@ -1,26 +1,21 @@
 /* src/elasticsearch.ts */
 
 import { Client, estypes } from "@elastic/elasticsearch";
-import {
-	Transport,
-	type TransportRequestParams,
-	HttpConnection,
-} from "@elastic/transport";
+import { HttpConnection } from "@elastic/transport";
 import { config } from "./config.js";
-import * as tls from "tls";
-import * as http from "http";
-import * as https from "https";
+import { Agent as HttpAgent } from "http";
+import { Agent as HttpsAgent } from "https";
 import { log, err, warn } from "./utils/logger.js";
 
 // Configure global agent defaults for keep-alive
-const httpAgent = new http.Agent({
+const httpAgent = new HttpAgent({
 	keepAlive: true,
 	keepAliveMsecs: 30000, // 30 seconds
 	maxSockets: 50,
 	timeout: 60000, // 1 minute
 });
 
-const httpsAgent = new https.Agent({
+const httpsAgent = new HttpsAgent({
 	keepAlive: true,
 	keepAliveMsecs: 30000, // 30 seconds
 	maxSockets: 50,

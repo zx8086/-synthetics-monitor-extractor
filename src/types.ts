@@ -1,9 +1,6 @@
 /* src/types.ts */
 
 import { z } from "zod";
-import { writeFile } from "fs/promises";
-import { join } from "path";
-import fs from "fs";
 import { storeInvalidRecord } from "./database.js";
 import { log, warn } from "./utils/logger.js";
 
@@ -777,10 +774,6 @@ export async function writeInvalidRecords(
 	}
 }
 
-// Function is maintained for backward compatibility but no longer needs to clear a buffer
-export function clearInvalidRecordsBuffer(): void {
-	// No need to clear anything with the database approach
-}
 
 // Validation functions
 export async function validateElasticsearchHits(

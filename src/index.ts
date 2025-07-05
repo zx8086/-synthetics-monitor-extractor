@@ -4,7 +4,6 @@
 console.log("Starting application - initializing OpenTelemetry");
 import { initializeOpenTelemetry } from "./instrumentation.js";
 const otelSdk = initializeOpenTelemetry();
-console.log("OpenTelemetry SDK initialized");
 console.log("OpenTelemetry initialized");
 
 import { Client, estypes } from "@elastic/elasticsearch";
@@ -17,7 +16,6 @@ import {
 	validateMonitorInfo,
 	ElasticsearchSourceSchema,
 	writeInvalidRecords,
-	clearInvalidRecordsBuffer,
 } from "./types.js";
 import type { InvalidRecord } from "./types.js";
 import { config } from "./config.js";
@@ -49,8 +47,10 @@ import {
 } from "./utils/parallelProcessor.js";
 import { ConfigManager } from "./utils/configManager.js";
 
+log("Initializing metrics...");
 console.log("Initializing metrics...");
 initializeMetrics();
+log("Metrics initialized");
 console.log("Metrics initialized");
 
 // Initialize configuration manager
@@ -88,9 +88,6 @@ configManager.onChange("logging", (newConfig, oldConfig) => {
 async function extractAndProcessMonitors() {
 	try {
 		log("Starting synthetic monitor data extraction...");
-
-		// Clear the invalid records buffer at the start of each extraction
-		clearInvalidRecordsBuffer();
 
 		// Only check connection if we haven't established one yet
 		const client = getElasticsearchClient();
@@ -626,9 +623,11 @@ async function startExtractionProcess() {
 			`Attempting to start API server on port ${config.metrics.port}`,
 		);
 		const apiServer = startApiServer(config.metrics.port);
+		log("API server started successfully");
 		console.log("API server started successfully");
 
 		// Initial connection validation
+		log("Validating connections to Elasticsearch and Kafka");
 		console.log("Validating connections to Elasticsearch and Kafka");
 		const connectionValidation = await validateConnections();
 
@@ -711,6 +710,7 @@ process.on("SIGTERM", async () => {
 	} catch (error) {
 		err("Error during shutdown:", error);
 	}
+	log("Synthetics Monitor Extractor exited.");
 	console.log("Synthetics Monitor Extractor exited.");
 	process.exit(0);
 });
@@ -730,6 +730,7 @@ process.on("SIGINT", async () => {
 	} catch (error) {
 		err("Error during shutdown:", error);
 	}
+	log("Synthetics Monitor Extractor exited.");
 	console.log("Synthetics Monitor Extractor exited.");
 	process.exit(0);
 });
@@ -737,6 +738,7 @@ process.on("SIGINT", async () => {
 // Run the extraction process if this file is executed directly
 if (import.meta.main) {
 	// Print to stdout (not via logger)
+	log("Synthetics Monitor Extractor started.");
 	console.log("Synthetics Monitor Extractor started.");
 	(async () => {
 		try {
@@ -751,6 +753,7 @@ if (import.meta.main) {
 }
 
 process.on("exit", () => {
+	log("Synthetics Monitor Extractor exited.");
 	console.log("Synthetics Monitor Extractor exited.");
 });
 

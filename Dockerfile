@@ -148,7 +148,7 @@ USER bun
 EXPOSE 9090/tcp
 
 # Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:9090/metrics || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:9090/health || exit 1
 
 CMD ["bun", "run", "dist/index.js"]
