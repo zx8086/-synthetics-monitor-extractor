@@ -45,27 +45,9 @@ async function validateElasticsearchConnection(): Promise<ValidationResult> {
 	try {
 		log("Testing Elasticsearch connection (validation_event: elasticsearch)");
 
-		const client = new Client({
-			node: config.elasticsearch.node,
-			...(config.elasticsearch.apiKeyId &&
-				config.elasticsearch.apiKey && {
-					auth: {
-						apiKey: {
-							id: config.elasticsearch.apiKeyId,
-							api_key: config.elasticsearch.apiKey,
-						},
-					},
-				}),
-			maxRetries: config.elasticsearch.maxRetries,
-			requestTimeout: config.elasticsearch.requestTimeout,
-			compression: config.elasticsearch.compression,
-			sniffOnStart: config.elasticsearch.sniffOnStart,
-			tls: {
-				rejectUnauthorized: config.elasticsearch.rejectUnauthorized,
-			},
-			name: config.elasticsearch.name,
-			opaqueIdPrefix: config.elasticsearch.opaqueIdPrefix,
-		});
+		// Use the same client from the main application that's working
+		const { getElasticsearchClient } = await import("./elasticsearch.js");
+		const client = getElasticsearchClient();
 
 		const response = await client.ping();
 		if (!response) {
@@ -94,7 +76,7 @@ async function validateElasticsearchConnection(): Promise<ValidationResult> {
 			);
 		}
 
-		await client.close();
+		// Don't close the shared client
 
 		return {
 			valid: true,

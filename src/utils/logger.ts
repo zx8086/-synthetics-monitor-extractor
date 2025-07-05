@@ -163,18 +163,21 @@ function getLogger(): winston.Logger {
 	);
 
 	const transports: TransportStream[] = [];
-	
+
 	// Always add console transport
-	transports.push(new winston.transports.Console({
-		level: config?.logging?.level || "info",
-		format: config?.logging?.format === "json" 
-			? winston.format.json()
-			: winston.format.combine(
-				winston.format.colorize(),
-				winston.format.simple()
-			)
-	}));
-	
+	transports.push(
+		new winston.transports.Console({
+			level: config?.logging?.level || "info",
+			format:
+				config?.logging?.format === "json"
+					? winston.format.json()
+					: winston.format.combine(
+							winston.format.colorize(),
+							winston.format.simple(),
+						),
+		}),
+	);
+
 	// Add OpenTelemetry transport if enabled
 	if (config?.openTelemetry?.enabled) {
 		try {

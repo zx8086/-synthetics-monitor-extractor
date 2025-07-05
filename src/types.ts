@@ -218,26 +218,13 @@ export interface SearchResponse<T> {
 }
 
 // Zod schemas for validation
+
+// Simple business context validation - preserve original format
 export const BusinessContextSchema = z.object({
-	domain: z
-		.string()
-		.min(1)
-		.refine((val) => val !== "unknown", {
-			message: "Domain cannot be 'unknown'",
-		}),
-	department: z
-		.string()
-		.min(1)
-		.refine((val) => val !== "unknown", {
-			message: "Department cannot be 'unknown'",
-		}),
+	domain: z.string(),
+	department: z.string(),
 	criticality: z.enum(["high", "medium", "low"]),
-	environment: z
-		.string()
-		.min(1)
-		.refine((val) => val !== "unknown", {
-			message: "Environment cannot be 'unknown'",
-		}),
+	environment: z.string(),
 });
 
 export const MonitorInfoSchema = z.object({

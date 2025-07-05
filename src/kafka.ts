@@ -12,6 +12,7 @@ import type { MonitorInfo } from "./types.js";
 import { writeInvalidRecords } from "./types.js";
 import { z } from "zod";
 import { log, err } from "./utils/logger.js";
+import { CircuitBreaker, ExponentialBackoff } from "./utils/circuitBreaker.js";
 
 // Define Zod schemas for Kafka messages
 const KafkaHeaderSchema = z.record(z.string());
@@ -27,6 +28,23 @@ type KafkaProducer = Producer<string, string, string, string>;
 
 // Singleton producer instance - let @platformatic/kafka handle the connection lifecycle
 let producerInstance: KafkaProducer | null = null;
+
+// Circuit breaker for Kafka operations
+const kafkaCircuitBreaker = new CircuitBreaker({
+	failureThreshold: 3,
+	resetTimeout: 30000, // 30 seconds (shorter than Elasticsearch)
+	halfOpenMaxCalls: 2,
+	successThreshold: 1,
+	name: "Kafka",
+});
+
+// Exponential backoff for Kafka retries
+const kafkaBackoff = new ExponentialBackoff({
+	baseDelay: 500,
+	maxDelay: 10000,
+	jitterFactor: 0.2,
+	maxAttempts: 3,
+});
 
 /**
  * Creates a properly configured Kafka producer
@@ -158,8 +176,7 @@ function createMessageHeaders(monitor: MonitorInfo): Map<string, string> {
 }
 
 /**
- * Send monitor data to a single Kafka topic
- * Domain-specific routing will be handled downstream with Kafka Streams
+ * Send monitor data to Kafka topic
  */
 export async function sendMonitorDataToKafka(
 	monitorData: MonitorInfo[],
@@ -169,122 +186,80 @@ export async function sendMonitorDataToKafka(
 	}
 
 	const producer = getKafkaProducer();
-	const singleTopicName = config.kafka.topicName;
+	const topicName = config.kafka.topicName;
 
-	try {
-		log(`Sending ${monitorData.length} messages to topic: ${singleTopicName}`);
+	return kafkaCircuitBreaker
+		.execute(async () => {
+			return kafkaBackoff.execute(async () => {
+				// Prepare all messages for the single topic
+				const messages: any[] = [];
 
-		const messages = monitorData.map((item) => {
-			const domain = item.businessContext.domain || "unknown";
-			const department = item.businessContext.department || "unknown";
-			const timestamp = new Date(item.timestamp).getTime();
-			const rawKey = `raw::${domain}::${item.name}::${timestamp}`;
-			const uniqueKey = sanitizeKey(rawKey);
+				for (const item of monitorData) {
+					const domain = item.businessContext.domain || "unknown";
+					const timestamp = new Date(item.timestamp).getTime();
+					const rawKey = `raw::${domain}::${item.name}::${timestamp}`;
+					const uniqueKey = sanitizeKey(rawKey);
 
-			// Track message size metrics
-			if (kafkaMessageSizeHistogram) {
-				const messageSize = Buffer.byteLength(JSON.stringify(item));
-				kafkaMessageSizeHistogram.observe(
-					{ topic: singleTopicName },
-					messageSize,
-				);
-			}
+					// Track message size metrics
+					if (kafkaMessageSizeHistogram) {
+						const messageSize = Buffer.byteLength(JSON.stringify(item));
+						kafkaMessageSizeHistogram.observe(
+							{ topic: topicName },
+							messageSize,
+						);
+					}
 
-			// Create a document structure that matches the original Elasticsearch document
-			const originalDocument = {
-				monitor: item.monitor,
-				http: item.http,
-				tls: item.tls,
-				tcp: item.tcp,
-				icmp: item.icmp,
-				synthetics: item.synthetics,
-				summary: item.summary,
-				state: item.state,
-				event: item.event,
-				data_stream: item.data_stream,
-				ecs: item.ecs,
-				config_id: item.config_id,
-				agent: item.agent,
-				observer: item.observer,
-				meta: item.meta,
-				project: item.monitor.project,
-				timespan: item.monitor.timespan,
-				check_group: item.monitor.check_group,
-				fleet_managed: item.monitor.fleet_managed,
-				origin: item.monitor.origin,
-				ip: item.ip,
-				url: item.url,
-				tags: item.tags,
-				"@timestamp": item.timestamp,
+					// Create headers as a plain object instead of a Map
+					const headers = createMessageHeaders(item);
+
+					// Log the message being sent
+					log(`Sending message to Kafka: - ${uniqueKey} (type: ${item.type})`);
+
+					const kafkaMessage = createKafkaMessage(
+						topicName,
+						uniqueKey,
+						JSON.stringify(item),
+						headers,
+					);
+
+					messages.push(kafkaMessage);
+				}
+
+				// Send all messages to the single topic
+				log(`Sending ${messages.length} messages to topic: ${topicName}`);
+
+				await producer.send({
+					messages,
+					acks: ProduceAcks.LEADER, // Only wait for leader acknowledgment
+				});
+
+				log(`Successfully sent ${messages.length} messages to ${topicName}`);
+			});
+		})
+		.catch((error: any) => {
+			// Enhanced error logging with circuit breaker context
+			const errorInfo = {
+				kafka_error: {
+					message: error.message,
+					code: error.code,
+					name: error.name,
+				},
+				circuit_breaker_state: kafkaCircuitBreaker.getState(),
+				circuit_breaker_metrics: kafkaCircuitBreaker.getMetrics(),
+				retry_attempt: kafkaBackoff.getAttempts(),
+				topic: topicName,
+				message_count: monitorData.length,
 			};
 
-			// Validate message content matches original document structure
-			const differences = findDifferences(originalDocument, {
-				monitor: item.monitor,
-				http: item.http,
-				tls: item.tls,
-				tcp: item.tcp,
-				icmp: item.icmp,
-				synthetics: item.synthetics,
-				summary: item.summary,
-				state: item.state,
-				event: item.event,
-				data_stream: item.data_stream,
-				ecs: item.ecs,
-				config_id: item.config_id,
-				agent: item.agent,
-				observer: item.observer,
-				meta: item.meta,
-				project: item.monitor.project,
-				timespan: item.monitor.timespan,
-				check_group: item.monitor.check_group,
-				fleet_managed: item.monitor.fleet_managed,
-				origin: item.monitor.origin,
-				ip: item.ip,
-				url: item.url,
-				tags: item.tags,
-				"@timestamp": item.timestamp,
-			});
-
-			if (differences.length > 0) {
-				err(
-					`Message content mismatch detected (key: ${uniqueKey}, type: ${item.type}, differences: ${JSON.stringify(differences)})`,
-				);
-				throw new Error(
-					"Message content validation failed - content is not identical",
-				);
+			if (error.code === "PLT_KFK_PRODUCER_ERROR") {
+				err(`Kafka producer error`, errorInfo);
+			} else if (error.code === "PLT_KFK_CONNECTION_ERROR") {
+				err(`Kafka connection error`, errorInfo);
+			} else {
+				err(`Kafka send error`, errorInfo);
 			}
-
-			// Log the message being sent
-			log(`Sending message to Kafka: - ${uniqueKey} (type: ${item.type})`);
-
-			// Create headers as a plain object instead of a Map
-			const headers = createMessageHeaders(item);
-
-			return createKafkaMessage(
-				singleTopicName,
-				uniqueKey,
-				JSON.stringify(item),
-				headers,
-			);
+			throw error;
 		});
-
-		await producer.send({
-			messages,
-			acks: ProduceAcks.LEADER, // Only wait for leader acknowledgment
-		});
-
-		log(`Successfully sent ${messages.length} messages to ${singleTopicName}`);
-	} catch (error: any) {
-		if (error.code === "PLT_KFK_PRODUCER_ERROR") {
-			err(`Producer error: ${error.message}`);
-		} else if (error.code === "PLT_KFK_CONNECTION_ERROR") {
-			err(`Connection error: ${error.message}`);
-		} else {
-			err(`Error sending to Kafka: ${error}`);
-		}
-		throw error;
-	}
 }
 
 // Helper function to find differences between objects
@@ -395,7 +370,7 @@ function validateMonitorSection(original: any, transformed: any): string[] {
 }
 
 /**
- * Check Kafka connection and list topics
+ * Check Kafka connection and list topics with circuit breaker protection
  */
 export async function checkKafkaConnection(): Promise<{
 	connected: boolean;
@@ -405,38 +380,52 @@ export async function checkKafkaConnection(): Promise<{
 	try {
 		log(`Checking Kafka connection at: ${config.kafka.brokers.join(",")}`);
 
-		const admin = getKafkaAdmin();
+		const result = await kafkaCircuitBreaker.execute(async () => {
+			const admin = getKafkaAdmin();
 
-		// Get metadata for all topics
-		const metadata = await admin.metadata({ topics: [] });
+			try {
+				// Get metadata for all topics
+				const metadata = await admin.metadata({ topics: [] });
 
-		let topics: string[] = [];
+				let topics: string[] = [];
 
-		// Extract topics from metadata
-		if (metadata.topics instanceof Map) {
-			topics = Array.from(metadata.topics.keys());
-		} else if (typeof metadata.topics === "object") {
-			topics = Object.keys(metadata.topics);
-		}
+				// Extract topics from metadata
+				if (metadata.topics instanceof Map) {
+					topics = Array.from(metadata.topics.keys());
+				} else if (typeof metadata.topics === "object") {
+					topics = Object.keys(metadata.topics);
+				}
 
-		// Filter for monitoring topics
-		const monitoringTopics = topics.filter(
-			(topic) => typeof topic === "string" && topic.startsWith("monitoring."),
-		);
+				// Filter for monitoring topics
+				const monitoringTopics = topics.filter(
+					(topic) =>
+						typeof topic === "string" && topic.startsWith("monitoring."),
+				);
+
+				return { topics, monitoringTopics };
+			} finally {
+				await admin.close();
+			}
+		});
 
 		log("✅ Successfully connected to Kafka");
-		log(`📋 Available monitoring topics: ${monitoringTopics}`);
-
-		await admin.close();
+		log(`📋 Available monitoring topics: ${result.monitoringTopics}`);
 
 		return {
 			connected: true,
-			topics,
-			monitoringTopics,
+			...result,
 		};
 	} catch (error: any) {
-		log("❌ Failed to connect to Kafka");
-		log(`Error details: ${error?.message || "Unknown error"}`);
+		err("❌ Failed to connect to Kafka", {
+			kafka_error: {
+				message: error?.message || "Unknown error",
+				name: error?.name,
+				code: error?.code,
+			},
+			circuit_breaker_state: kafkaCircuitBreaker.getState(),
+			circuit_breaker_metrics: kafkaCircuitBreaker.getMetrics(),
+			brokers: config.kafka.brokers,
+		});
 
 		return {
 			connected: false,

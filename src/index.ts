@@ -43,10 +43,46 @@ import {
 	closeKafkaProducer,
 } from "./kafka.js";
 import { log, err, warn, debug } from "./utils/logger.js";
+import {
+	ParallelProcessor,
+	StreamingProcessor,
+} from "./utils/parallelProcessor.js";
+import { ConfigManager } from "./utils/configManager.js";
 
 console.log("Initializing metrics...");
 initializeMetrics();
 console.log("Metrics initialized");
+
+// Initialize configuration manager
+const configManager = new ConfigManager({
+	extraction: {
+		batchProcessing: config.extraction.batchProcessing,
+	},
+	logging: {
+		level: config.logging.level,
+	},
+});
+
+// Set up configuration change listeners
+configManager.onChange("extraction", (newConfig, oldConfig) => {
+	log("Extraction configuration updated", {
+		config_change: {
+			section: "extraction",
+			old: oldConfig,
+			new: newConfig,
+		},
+	});
+});
+
+configManager.onChange("logging", (newConfig, oldConfig) => {
+	log("Logging configuration updated", {
+		config_change: {
+			section: "logging",
+			old: oldConfig,
+			new: newConfig,
+		},
+	});
+});
 
 // Main function to extract and process monitor data
 async function extractAndProcessMonitors() {
@@ -89,7 +125,7 @@ async function extractAndProcessMonitors() {
 		// Process and transform the monitor data
 		const transformedData = await transformMonitorData(monitorData);
 
-		// Send to Kafka topics using our service
+		// Send to Kafka topic
 		await sendMonitorDataToKafka(transformedData);
 
 		log("Monitor extraction completed successfully");
@@ -278,8 +314,270 @@ export function extractBusinessContext(
 	};
 }
 
-// Transform monitor data with comprehensive field extraction
+// Transform a single monitor hit to MonitorInfo
+async function transformSingleMonitor(
+	hit: ElasticsearchHit,
+): Promise<MonitorInfo> {
+	const businessContext = extractBusinessContext(hit._source);
+
+	// Only include HTTP if it has the required response structure
+	const httpData = hit._source.http?.response?.status_code
+		? {
+				response: {
+					status_code: hit._source.http.response.status_code,
+					mime_type: hit._source.http.response.mime_type,
+					headers: hit._source.http.response.headers,
+					body: hit._source.http.response.body
+						? {
+								bytes: hit._source.http.response.body.bytes || 0,
+								content: hit._source.http.response.body.content || "",
+								hash: hit._source.http.response.body.hash || "",
+							}
+						: undefined,
+				},
+				...(hit._source.http.rtt ? { rtt: hit._source.http.rtt } : {}),
+				...(hit._source.http.state
+					? {
+							state:
+								typeof hit._source.http.state === "string"
+									? hit._source.http.state
+									: JSON.stringify(hit._source.http.state),
+						}
+					: {}),
+			}
+		: undefined;
+
+	// Fix the port type issue by ensuring it's a number
+	const url = hit._source.url || {
+		scheme: undefined,
+		domain: undefined,
+		port: undefined,
+		path: undefined,
+		full: undefined,
+	};
+
+	// Convert port to number if it's a string
+	if (url.port && typeof url.port === "string") {
+		url.port = parseInt(url.port, 10);
+	}
+
+	// Only include data_stream if all required fields are present
+	const dataStream =
+		hit._source.data_stream?.namespace &&
+		hit._source.data_stream?.type &&
+		hit._source.data_stream?.dataset
+			? {
+					namespace: hit._source.data_stream.namespace,
+					type: hit._source.data_stream.type,
+					dataset: hit._source.data_stream.dataset,
+				}
+			: undefined;
+
+	const transformedMonitor: MonitorInfo = {
+		id: hit._source.monitor.id,
+		name: hit._source.monitor.name,
+		type: hit._source.monitor.type,
+		url: {
+			scheme: url.scheme,
+			domain: url.domain,
+			port: typeof url.port === "number" ? url.port : undefined,
+			path: url.path,
+			full: url.full,
+		},
+		timestamp: hit._source["@timestamp"],
+		businessContext,
+		tags: hit._source.tags || [],
+		monitor: {
+			id: hit._source.monitor.id,
+			name: hit._source.monitor.name,
+			type: hit._source.monitor.type,
+			status: hit._source.monitor.status,
+			duration: hit._source.monitor.duration,
+			ip: hit._source.monitor.ip,
+			origin: hit._source.monitor.origin,
+			timespan: hit._source.monitor.timespan,
+			fleet_managed: hit._source.monitor.fleet_managed,
+			check_group: hit._source.monitor.check_group,
+			project: hit._source.monitor.project,
+		},
+		...(httpData ? { http: httpData } : {}),
+		...(hit._source.tcp ? { tcp: hit._source.tcp } : {}),
+		...(hit._source.icmp ? { icmp: hit._source.icmp } : {}),
+		...(hit._source.synthetics
+			? { synthetics: { type: hit._source.synthetics.type } }
+			: {}),
+		...(hit._source.summary
+			? {
+					summary: {
+						retry_group: hit._source.summary.retry_group || "",
+						max_attempts: hit._source.summary.max_attempts || 0,
+						up: hit._source.summary.up || 0,
+						down: hit._source.summary.down || 0,
+						attempt: hit._source.summary.attempt || 0,
+						final_attempt: hit._source.summary.final_attempt || false,
+						status: hit._source.summary.status || "",
+					},
+				}
+			: {}),
+		...(hit._source.state
+			? {
+					state: {
+						duration_ms: hit._source.state.duration_ms || "",
+						checks: hit._source.state.checks || 0,
+						ends: hit._source.state.ends || null,
+						started_at: hit._source.state.started_at || "",
+						up: hit._source.state.up || 0,
+						id: hit._source.state.id || "",
+						down: hit._source.state.down || 0,
+						flap_history: hit._source.state.flap_history || [],
+						status: hit._source.state.status || "",
+					},
+				}
+			: {}),
+		...(hit._source.event
+			? {
+					event: {
+						agent_id_status: hit._source.event.agent_id_status,
+						ingested: hit._source.event.ingested,
+						type: hit._source.event.type,
+						dataset: hit._source.event.dataset,
+					},
+				}
+			: {}),
+		...(dataStream ? { data_stream: dataStream } : {}),
+		...(hit._source.ecs && hit._source.ecs.version
+			? { ecs: { version: hit._source.ecs.version } }
+			: {}),
+		...(hit._source.config_id ? { config_id: hit._source.config_id } : {}),
+		...(hit._source.agent &&
+		hit._source.agent.name &&
+		hit._source.agent.id &&
+		hit._source.agent.type &&
+		hit._source.agent.version
+			? {
+					agent: {
+						name: hit._source.agent.name,
+						id: hit._source.agent.id,
+						type: hit._source.agent.type,
+						version: hit._source.agent.version,
+						ephemeral_id: hit._source.agent.ephemeral_id || "",
+					},
+				}
+			: {}),
+		...(hit._source.observer && hit._source.observer.name
+			? {
+					observer: {
+						name: hit._source.observer.name || "",
+						...(hit._source.observer.geo && hit._source.observer.geo.name
+							? { geo: { name: hit._source.observer.geo.name || "" } }
+							: {}),
+					},
+				}
+			: {}),
+		...(hit._source.meta ? { meta: hit._source.meta } : {}),
+	};
+
+	return transformedMonitor;
+}
+
+// Transform monitor data with parallel processing
 async function transformMonitorData(
+	monitorData: ElasticsearchHit[],
+): Promise<MonitorInfo[]> {
+	if (!monitorData || monitorData.length === 0) {
+		return [];
+	}
+
+	const batchConfig = configManager.getSection("extraction").batchProcessing;
+
+	// Use streaming for large datasets, parallel processing for smaller ones
+	if (monitorData.length >= batchConfig.streamingThreshold) {
+		log(
+			`Using streaming processing for ${monitorData.length} items (threshold: ${batchConfig.streamingThreshold})`,
+		);
+
+		const streamProcessor = new StreamingProcessor(
+			transformSingleMonitor,
+			undefined, // onResult - not needed for this use case
+			(error, item) => {
+				// Error handler for streaming
+				const monitorName = item._source.monitor.name;
+				err(`Streaming transformation error for monitor ${monitorName}`, {
+					transformation_error: {
+						monitor: monitorName,
+						error: error.message,
+					},
+				});
+				// Store error for database writing
+				writeInvalidRecords(
+					"monitor_transformation",
+					[{ message: error.message }],
+					monitorName,
+				);
+			},
+			100, // Progress log every 100 items
+		);
+
+		return await streamProcessor.processAll(monitorData);
+	} else if (batchConfig.enabled) {
+		log(`Using parallel processing for ${monitorData.length} items`);
+
+		const parallelProcessor = new ParallelProcessor<
+			ElasticsearchHit,
+			MonitorInfo
+		>({
+			batchSize: batchConfig.batchSize,
+			maxConcurrency: batchConfig.maxConcurrency,
+			retryAttempts: batchConfig.retryAttempts,
+			retryDelay: 1000,
+		});
+
+		const { results, errors } = await parallelProcessor.processBatches(
+			monitorData,
+			transformSingleMonitor,
+			(item, error) => {
+				// Error handler for parallel processing
+				const monitorName = item._source.monitor.name;
+				return {
+					monitorName,
+					error: error.message,
+				};
+			},
+		);
+
+		// Write errors to database grouped by monitor
+		if (errors.length > 0) {
+			const errorsByMonitor: Record<string, string[]> = {};
+
+			for (const error of errors) {
+				if (!errorsByMonitor[error.monitorName]) {
+					errorsByMonitor[error.monitorName] = [];
+				}
+				errorsByMonitor[error.monitorName].push(error.error);
+			}
+
+			// Write grouped errors to database
+			for (const [monitorName, messages] of Object.entries(errorsByMonitor)) {
+				await writeInvalidRecords(
+					"monitor_transformation",
+					messages.map((message) => ({ message })),
+					monitorName,
+				);
+			}
+		}
+
+		return results;
+	} else {
+		// Fallback to sequential processing if batch processing is disabled
+		log(
+			`Using sequential processing for ${monitorData.length} items (batch processing disabled)`,
+		);
+		return await processSequentially(monitorData);
+	}
+}
+
+// Fallback sequential processing function
+async function processSequentially(
 	monitorData: ElasticsearchHit[],
 ): Promise<MonitorInfo[]> {
 	const transformedData: MonitorInfo[] = [];
@@ -287,165 +585,7 @@ async function transformMonitorData(
 
 	for (const hit of monitorData) {
 		try {
-			const businessContext = extractBusinessContext(hit._source);
-
-			// Only include HTTP if it has the required response structure
-			const httpData = hit._source.http?.response?.status_code
-				? {
-						response: {
-							status_code: hit._source.http.response.status_code,
-							mime_type: hit._source.http.response.mime_type,
-							headers: hit._source.http.response.headers,
-							body: hit._source.http.response.body
-								? {
-										bytes: hit._source.http.response.body.bytes || 0,
-										content: hit._source.http.response.body.content || "",
-										hash: hit._source.http.response.body.hash || "",
-									}
-								: undefined,
-						},
-						...(hit._source.http.rtt ? { rtt: hit._source.http.rtt } : {}),
-						...(hit._source.http.state
-							? {
-									state:
-										typeof hit._source.http.state === "string"
-											? hit._source.http.state
-											: JSON.stringify(hit._source.http.state),
-								}
-							: {}),
-					}
-				: undefined;
-
-			// Fix the port type issue by ensuring it's a number
-			const url = hit._source.url || {
-				scheme: undefined,
-				domain: undefined,
-				port: undefined,
-				path: undefined,
-				full: undefined,
-			};
-
-			// Convert port to number if it's a string
-			if (url.port && typeof url.port === "string") {
-				url.port = parseInt(url.port, 10);
-			}
-
-			// Only include data_stream if all required fields are present
-			const dataStream =
-				hit._source.data_stream?.namespace &&
-				hit._source.data_stream?.type &&
-				hit._source.data_stream?.dataset
-					? {
-							namespace: hit._source.data_stream.namespace,
-							type: hit._source.data_stream.type,
-							dataset: hit._source.data_stream.dataset,
-						}
-					: undefined;
-
-			const transformedMonitor: MonitorInfo = {
-				id: hit._source.monitor.id,
-				name: hit._source.monitor.name,
-				type: hit._source.monitor.type,
-				url: {
-					scheme: url.scheme,
-					domain: url.domain,
-					port: typeof url.port === "number" ? url.port : undefined,
-					path: url.path,
-					full: url.full,
-				},
-				timestamp: hit._source["@timestamp"],
-				businessContext,
-				tags: hit._source.tags || [],
-				monitor: {
-					id: hit._source.monitor.id,
-					name: hit._source.monitor.name,
-					type: hit._source.monitor.type,
-					status: hit._source.monitor.status,
-					duration: hit._source.monitor.duration,
-					ip: hit._source.monitor.ip,
-					origin: hit._source.monitor.origin,
-					timespan: hit._source.monitor.timespan,
-					fleet_managed: hit._source.monitor.fleet_managed,
-					check_group: hit._source.monitor.check_group,
-					project: hit._source.monitor.project,
-				},
-				...(httpData ? { http: httpData } : {}),
-				...(hit._source.tcp ? { tcp: hit._source.tcp } : {}),
-				...(hit._source.icmp ? { icmp: hit._source.icmp } : {}),
-				...(hit._source.synthetics
-					? { synthetics: { type: hit._source.synthetics.type } }
-					: {}),
-				...(hit._source.summary
-					? {
-							summary: {
-								retry_group: hit._source.summary.retry_group || "",
-								max_attempts: hit._source.summary.max_attempts || 0,
-								up: hit._source.summary.up || 0,
-								down: hit._source.summary.down || 0,
-								attempt: hit._source.summary.attempt || 0,
-								final_attempt: hit._source.summary.final_attempt || false,
-								status: hit._source.summary.status || "",
-							},
-						}
-					: {}),
-				...(hit._source.state
-					? {
-							state: {
-								duration_ms: hit._source.state.duration_ms || "",
-								checks: hit._source.state.checks || 0,
-								ends: hit._source.state.ends || null,
-								started_at: hit._source.state.started_at || "",
-								up: hit._source.state.up || 0,
-								id: hit._source.state.id || "",
-								down: hit._source.state.down || 0,
-								flap_history: hit._source.state.flap_history || [],
-								status: hit._source.state.status || "",
-							},
-						}
-					: {}),
-				...(hit._source.event
-					? {
-							event: {
-								agent_id_status: hit._source.event.agent_id_status,
-								ingested: hit._source.event.ingested,
-								type: hit._source.event.type,
-								dataset: hit._source.event.dataset,
-							},
-						}
-					: {}),
-				...(dataStream ? { data_stream: dataStream } : {}),
-				...(hit._source.ecs && hit._source.ecs.version
-					? { ecs: { version: hit._source.ecs.version } }
-					: {}),
-				...(hit._source.config_id ? { config_id: hit._source.config_id } : {}),
-				...(hit._source.agent &&
-				hit._source.agent.name &&
-				hit._source.agent.id &&
-				hit._source.agent.type &&
-				hit._source.agent.version
-					? {
-							agent: {
-								name: hit._source.agent.name,
-								id: hit._source.agent.id,
-								type: hit._source.agent.type,
-								version: hit._source.agent.version,
-								ephemeral_id: hit._source.agent.ephemeral_id || "",
-							},
-						}
-					: {}),
-				...(hit._source.observer && hit._source.observer.name
-					? {
-							observer: {
-								name: hit._source.observer.name || "",
-								...(hit._source.observer.geo && hit._source.observer.geo.name
-									? { geo: { name: hit._source.observer.geo.name || "" } }
-									: {}),
-							},
-						}
-					: {}),
-				...(hit._source.meta ? { meta: hit._source.meta } : {}),
-			};
-
+			const transformedMonitor = await transformSingleMonitor(hit);
 			transformedData.push(transformedMonitor);
 		} catch (error) {
 			const monitorName = hit._source.monitor.name;
@@ -476,6 +616,9 @@ async function startExtractionProcess() {
 	try {
 		// Initialize database
 		initializeDatabase();
+
+		// Start configuration hot-reload watching
+		await configManager.startWatching();
 
 		// Start API server (combines metrics and invalid records API)
 		log(`Starting API server on port ${config.metrics.port}...`);
@@ -559,6 +702,7 @@ process.on("SIGTERM", async () => {
 		await closeElasticsearchClient();
 		await closeKafkaProducer();
 		closeDatabase(); // Close the database connection
+		configManager.stopWatching(); // Stop configuration watching
 		// Shut down OpenTelemetry if it was initialized
 		if (otelSdk) {
 			await otelSdk.shutdown();
@@ -578,6 +722,7 @@ process.on("SIGINT", async () => {
 		await closeElasticsearchClient();
 		await closeKafkaProducer();
 		closeDatabase();
+		configManager.stopWatching(); // Stop configuration watching
 		if (otelSdk) {
 			await otelSdk.shutdown();
 		}

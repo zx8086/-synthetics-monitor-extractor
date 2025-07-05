@@ -1,0 +1,14 @@
+{
+  "extraction": {
+    "batchProcessing": {
+      "enabled": true,
+      "batchSize": 150,
+      "maxConcurrency": 6,
+      "streamingThreshold": 1000,
+      "retryAttempts": 3
+    }
+  },
+  "logging": {
+    "level": "info"
+  }
+}

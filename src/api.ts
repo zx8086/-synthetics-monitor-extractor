@@ -118,7 +118,16 @@ function compressResponse(
 	});
 }
 
-// Add common headers to response
+// Security configuration
+const SECURITY_CONFIG = {
+	maxRequestSize: 1024 * 1024, // 1MB
+	maxUrlLength: 2048,
+	maxHeaderSize: 8192,
+	allowedOrigins: ["*"], // Configure as needed for production
+	rateLimitByIP: true,
+};
+
+// Add common headers with security enhancements
 function addCommonHeaders(
 	response: Response,
 	req: Request,
@@ -126,12 +135,33 @@ function addCommonHeaders(
 	route: string,
 	status: number,
 ): void {
+	// CORS headers
 	response.headers.set("Access-Control-Allow-Origin", "*");
 	response.headers.set("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS");
 	response.headers.set(
 		"Access-Control-Allow-Headers",
-		"Content-Type, Accept-Encoding",
+		"Content-Type, Accept-Encoding, Content-Length",
 	);
+
+	// Security headers
+	response.headers.set("X-Content-Type-Options", "nosniff");
+	response.headers.set("X-Frame-Options", "DENY");
+	response.headers.set("X-XSS-Protection", "1; mode=block");
+	response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+	response.headers.set(
+		"Content-Security-Policy",
+		"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+	);
+
+	// Prevent caching of sensitive endpoints
+	if (route.includes("/api/")) {
+		response.headers.set(
+			"Cache-Control",
+			"no-store, no-cache, must-revalidate, private",
+		);
+		response.headers.set("Pragma", "no-cache");
+		response.headers.set("Expires", "0");
+	}
 
 	// Add performance headers
 	const duration = performance.now() - startTime;
@@ -155,6 +185,70 @@ function addCommonHeaders(
 
 	// Record response time
 	recordHttpResponseTime(duration, route, status);
+}
+
+// Input validation middleware
+function validateRequest(req: Request, startTime: number): Response | null {
+	const url = new URL(req.url);
+
+	// Check URL length
+	if (req.url.length > SECURITY_CONFIG.maxUrlLength) {
+		const response = Response.json(
+			{
+				error: "Request URL too long",
+				maxLength: SECURITY_CONFIG.maxUrlLength,
+			},
+			{ status: 414 },
+		);
+		addCommonHeaders(response, req, startTime, url.pathname, 414);
+		return response;
+	}
+
+	// Check for suspicious patterns in URL
+	const suspiciousPatterns = [
+		/<script/i,
+		/javascript:/i,
+		/data:/i,
+		/vbscript:/i,
+		/<iframe/i,
+		/\.\.\//,
+		/\/\.\./,
+	];
+
+	for (const pattern of suspiciousPatterns) {
+		if (pattern.test(req.url)) {
+			log(`Blocked suspicious request: ${req.url}`, {
+				security_event: "suspicious_request_blocked",
+				client_ip: req.headers.get("x-forwarded-for") || "unknown",
+				user_agent: req.headers.get("user-agent") || "unknown",
+			});
+			const response = Response.json(
+				{ error: "Invalid request" },
+				{ status: 400 },
+			);
+			addCommonHeaders(response, req, startTime, url.pathname, 400);
+			return response;
+		}
+	}
+
+	// Validate Content-Length if present
+	const contentLength = req.headers.get("content-length");
+	if (
+		contentLength &&
+		parseInt(contentLength) > SECURITY_CONFIG.maxRequestSize
+	) {
+		const response = Response.json(
+			{
+				error: "Request entity too large",
+				maxSize: SECURITY_CONFIG.maxRequestSize,
+			},
+			{ status: 413 },
+		);
+		addCommonHeaders(response, req, startTime, url.pathname, 413);
+		return response;
+	}
+
+	return null;
 }
 
 // Rate limiting middleware
@@ -255,6 +349,18 @@ export function startApiServer(port: number = config.metrics.port): Server {
 
 			// Execute the entire request within a span
 			return executeWithSpan(`${method} ${route}`, spanAttributes, async () => {
+				// Validate request security
+				const validationError = validateRequest(req, startTime);
+				if (validationError) {
+					return validationError;
+				}
+
+				// Check rate limiting
+				const rateLimitError = checkRateLimit(req, startTime);
+				if (rateLimitError) {
+					return rateLimitError;
+				}
+
 				// Enable CORS
 				const headers = {
 					"Access-Control-Allow-Origin": "*",
