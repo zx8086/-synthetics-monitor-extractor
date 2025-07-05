@@ -58,6 +58,8 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           snyk_token: ${{ secrets.SNYK_TOKEN }}
+          cosign_version: ${{ env.COSIGN_VERSION }}
+          syft_version: ${{ env.SYFT_VERSION }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -270,53 +272,6 @@ jobs:
           path: sbom.spdx.json
         continue-on-error: true
 
-      - name: Install verification tools
-        if: github.event_name != 'pull_request'
-        shell: bash
-        run: |
-          # Create directories first
-          mkdir -p "${GITHUB_WORKSPACE}/bin"
-          mkdir -p "${GITHUB_WORKSPACE}/tmp"
-          
-          cd "${GITHUB_WORKSPACE}/tmp"
-
-          # Detect architecture
-          ARCH=$(uname -m)
-          case $ARCH in
-            x86_64)
-              ARCH_SUFFIX="amd64"
-              ;;
-            aarch64|arm64)
-              ARCH_SUFFIX="arm64"
-              ;;
-            *)
-              echo "Unsupported architecture: $ARCH"
-              exit 1
-              ;;
-          esac
-
-          # Install cosign
-          curl -Lo cosign "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-${ARCH_SUFFIX}"
-          chmod +x cosign
-          mv cosign "${GITHUB_WORKSPACE}/bin/"
-
-          # Install syft
-          SYFT_RELEASE=$(curl -s https://api.github.com/repos/anchore/syft/releases/latest | grep -o '"tag_name": ".*"' | cut -d'"' -f4)
-          curl -Lo syft.tar.gz "https://github.com/anchore/syft/releases/download/${SYFT_RELEASE}/syft_${SYFT_RELEASE#v}_linux_${ARCH_SUFFIX}.tar.gz"
-          tar xzf syft.tar.gz syft
-          mv syft "${GITHUB_WORKSPACE}/bin/"
-
-          # Add to PATH
-          echo "${GITHUB_WORKSPACE}/bin" >> $GITHUB_PATH
-
-          # Cleanup
-          cd "${GITHUB_WORKSPACE}"
-          rm -rf "${GITHUB_WORKSPACE}/tmp"
-
-          # Verify installations
-          "${GITHUB_WORKSPACE}/bin/cosign" version || true
-          "${GITHUB_WORKSPACE}/bin/syft" --version || true
-        continue-on-error: true
 
       - name: Test container health
         if: github.event_name != 'pull_request'

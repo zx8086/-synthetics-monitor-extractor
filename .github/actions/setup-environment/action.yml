@@ -1,9 +1,17 @@
 name: "Setup Environment"
-description: "Setup Bun, Snyk, and environment for synthetics-monitor-extractor"
+description: "Setup Bun, Snyk, verification tools (Cosign, Syft), and environment for synthetics-monitor-extractor"
 inputs:
   snyk_token:
     description: "Snyk API token for authentication"
     required: false
+  cosign_version:
+    description: "Cosign version to install"
+    required: false
+    default: "v2.4.0"
+  syft_version:
+    description: "Syft version to install"
+    required: false
+    default: "v1.19.0"
 runs:
   using: "composite"
   steps:
@@ -48,6 +56,76 @@ runs:
         else
           echo "SNYK_TOKEN not provided. Skipping Snyk authentication."
         fi
+      continue-on-error: true
+
+    - name: Setup verification tools
+      shell: bash
+      run: |
+        # Create directories first
+        mkdir -p "${GITHUB_WORKSPACE}/bin"
+        mkdir -p "${GITHUB_WORKSPACE}/tmp"
+        
+        cd "${GITHUB_WORKSPACE}/tmp"
+
+        # Detect architecture
+        ARCH=$(uname -m)
+        case $ARCH in
+          x86_64)
+            ARCH_SUFFIX="amd64"
+            ;;
+          aarch64|arm64)
+            ARCH_SUFFIX="arm64"
+            ;;
+          *)
+            echo "Unsupported architecture: $ARCH"
+            exit 1
+            ;;
+        esac
+
+        echo "Installing verification tools for architecture: ${ARCH_SUFFIX}"
+
+        # Install cosign
+        echo "Installing Cosign ${{ inputs.cosign_version }}..."
+        curl -Lo cosign "https://github.com/sigstore/cosign/releases/download/${{ inputs.cosign_version }}/cosign-linux-${ARCH_SUFFIX}"
+        chmod +x cosign
+        mv cosign "${GITHUB_WORKSPACE}/bin/"
+
+        # Install syft
+        echo "Installing Syft ${{ inputs.syft_version }}..."
+        curl -Lo syft.tar.gz "https://github.com/anchore/syft/releases/download/${{ inputs.syft_version }}/syft_${{ inputs.syft_version #v }}_linux_${ARCH_SUFFIX}.tar.gz"
+        tar xzf syft.tar.gz syft
+        mv syft "${GITHUB_WORKSPACE}/bin/"
+
+        # Add to PATH
+        echo "${GITHUB_WORKSPACE}/bin" >> $GITHUB_PATH
+
+        # Cleanup
+        cd "${GITHUB_WORKSPACE}"
+        rm -rf "${GITHUB_WORKSPACE}/tmp"
+
+        echo "Verification tools installed successfully"
+      continue-on-error: true
+
+    - name: Verify tool installations
+      shell: bash
+      run: |
+        echo "Verifying tool installations..."
+        
+        # Verify cosign
+        if "${GITHUB_WORKSPACE}/bin/cosign" version; then
+          echo "✅ Cosign installed successfully"
+        else
+          echo "❌ Cosign installation failed"
+        fi
+        
+        # Verify syft
+        if "${GITHUB_WORKSPACE}/bin/syft" --version; then
+          echo "✅ Syft installed successfully"
+        else
+          echo "❌ Syft installation failed"
+        fi
+        
+        echo "Tool verification completed"
       continue-on-error: true
 
     - name: Setup environment variables

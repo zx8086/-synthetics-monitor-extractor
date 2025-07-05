@@ -405,7 +405,7 @@ function loadConfigFromEnv(): Partial<Config> {
 		port: getEnvConfig(envVarMapping.metrics.port, "number"),
 		prefix: getEnvConfig(envVarMapping.metrics.prefix, "string"),
 		endpoint: getEnvConfig(envVarMapping.metrics.endpoint, "string"),
-	};
+	});
 
 	// Load API config
 	envConfig.api = filterUndefined({
@@ -431,7 +431,7 @@ function loadConfigFromEnv(): Partial<Config> {
 				"boolean",
 			),
 		}),
-	};
+	});
 
 	// Load OpenTelemetry config
 	envConfig.openTelemetry = filterUndefined({
