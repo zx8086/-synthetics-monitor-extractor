@@ -10,9 +10,7 @@ RUN apk update && \
     curl \
     ca-certificates \
     dumb-init \
-    && rm -rf /var/cache/apk/* \
-    && addgroup -g 1001 -S nodejs \
-    && adduser -S bun -u 1001 -G nodejs
+    && rm -rf /var/cache/apk/*
 
 # Set common environment variables
 ENV CN_ROOT=/usr/src/app \
