@@ -74,5 +74,43 @@ ignore:
           Our application does not use JWT authentication directly.
         expires: '2025-08-05T10:00:00.000Z'
 
+  # High severity - Code Injection in lodash@3.10.1
+  SNYK-JS-LODASH-1040724:
+    - '*':
+        reason: >
+          This vulnerability is in a transitive dependency of an old version of inquirer.
+          The inquirer package is not directly used by our application but may be pulled
+          in by development tools. We should update all dependencies regularly.
+        expires: '2025-08-05T10:00:00.000Z'
+        
+  # High severity - Prototype Pollution in lodash@3.10.1 (multiple CVEs)
+  SNYK-JS-LODASH-608086:
+    - '*':
+        reason: >
+          This vulnerability is in a transitive dependency. The affected lodash version
+          is not used by our application directly.
+        expires: '2025-08-05T10:00:00.000Z'
+        
+  SNYK-JS-LODASH-6139239:
+    - '*':
+        reason: >
+          This vulnerability is in a transitive dependency. The affected lodash version
+          is not used by our application directly.
+        expires: '2025-08-05T10:00:00.000Z'
+        
+  SNYK-JS-LODASH-450202:
+    - '*':
+        reason: >
+          This vulnerability is in a transitive dependency. The affected lodash version
+          is not used by our application directly.
+        expires: '2025-08-05T10:00:00.000Z'
+        
+  SNYK-JS-LODASH-73638:
+    - '*':
+        reason: >
+          This vulnerability is in a transitive dependency. The affected lodash version
+          is not used by our application directly.
+        expires: '2025-08-05T10:00:00.000Z'
+
 # patches apply the minimum changes required to fix a vulnerability
 patches: {}

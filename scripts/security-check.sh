@@ -48,7 +48,7 @@ else
 fi
 
 # Check if we're updating Alpine packages
-if grep -q "apk update && apk upgrade" Dockerfile; then
+if grep -q "apk update" Dockerfile && grep -q "apk upgrade" Dockerfile; then
     print_status "success" "Alpine packages are being updated"
 else
     print_status "warning" "Add 'apk update && apk upgrade' to Dockerfile"

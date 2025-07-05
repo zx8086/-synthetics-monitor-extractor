@@ -42,6 +42,9 @@ bun run docker:security
 
 # Run security best practices check
 bun run security:check
+
+# Fix known vulnerabilities automatically
+bun run security:fix
 ```
 
 ### Security Features
