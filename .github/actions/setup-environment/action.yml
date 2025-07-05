@@ -137,3 +137,4 @@ language-settings:
     enableLsp: true
 EOF
         echo "✅ Snyk configuration created"
+      continue-on-error: true
