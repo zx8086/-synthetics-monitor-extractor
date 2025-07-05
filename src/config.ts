@@ -99,11 +99,8 @@ const LoggingConfigSchema = z.object({
     enabled: true,
   }),
   opentelemetry: z.object({
-    enabled: z.boolean().default(false),
     level: z.enum(["debug", "info", "warn", "error"]).optional(),
-  }).default({
-    enabled: false,
-  }),
+  }).default({}),
 });
 
 const MetricsConfigSchema = z.object({
@@ -199,9 +196,7 @@ const defaultConfig: Config = {
     console: {
       enabled: true,
     },
-    opentelemetry: {
-      enabled: false,
-    },
+    opentelemetry: {},
   },
   metrics: {
     enabled: true,
@@ -287,7 +282,6 @@ const envVarMapping = {
       level: "LOG_CONSOLE_LEVEL",
     },
     opentelemetry: {
-      enabled: "LOG_OPENTELEMETRY_ENABLED",
       level: "LOG_OPENTELEMETRY_LEVEL",
     },
   },
@@ -480,7 +474,6 @@ function loadConfigFromEnv(): Partial<Config> {
       level: getEnvConfig(envVarMapping.logging.console.level, "string"),
     }),
     opentelemetry: filterUndefined({
-      enabled: getEnvConfig(envVarMapping.logging.opentelemetry.enabled, "boolean"),
       level: getEnvConfig(envVarMapping.logging.opentelemetry.level, "string"),
     }),
   });
@@ -743,7 +736,7 @@ try {
             level: config.logging.console.level,
           },
           opentelemetry: {
-            enabled: config.logging.opentelemetry.enabled,
+            enabled: config.openTelemetry.enabled, // Uses global OPEN_TELEMETRY_ENABLED
             level: config.logging.opentelemetry.level,
           },
         },

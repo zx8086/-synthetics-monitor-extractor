@@ -26,7 +26,7 @@ LOG_CONSOLE_LEVEL=info            # Set console-specific log level
 
 #### OpenTelemetry Logging 
 ```bash
-LOG_OPENTELEMETRY_ENABLED=true    # Enable OTEL logging (independent of OPEN_TELEMETRY_ENABLED)
+OPEN_TELEMETRY_ENABLED=true       # Enable OTEL logging (controls traces, metrics, AND logs)
 LOG_OPENTELEMETRY_LEVEL=debug     # Set OTEL-specific log level
 ```
 
@@ -42,20 +42,20 @@ LOG_INCLUDE_TIMESTAMP=true        # Include timestamps
 **Console only (traditional setup):**
 ```bash
 LOG_CONSOLE_ENABLED=true
-LOG_OPENTELEMETRY_ENABLED=false
+OPEN_TELEMETRY_ENABLED=false
 ```
 
 **OpenTelemetry only (cloud-native):**
 ```bash
 LOG_CONSOLE_ENABLED=false
-LOG_OPENTELEMETRY_ENABLED=true
+OPEN_TELEMETRY_ENABLED=true
 OPEN_TELEMETRY_LOGS_ENDPOINT=https://your-otel-collector:4318/v1/logs
 ```
 
 **Both channels (development/debugging):**
 ```bash
 LOG_CONSOLE_ENABLED=true
-LOG_OPENTELEMETRY_ENABLED=true
+OPEN_TELEMETRY_ENABLED=true
 LOG_CONSOLE_LEVEL=info
 LOG_OPENTELEMETRY_LEVEL=debug
 ```
