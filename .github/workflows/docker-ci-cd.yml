@@ -60,7 +60,14 @@ jobs:
 
       - name: Create and use Docker Cloud Builder
         run: |
-          docker buildx create --driver cloud zx8086/cldbuild --name cloud-builder --use || true
+          # Check if cloud-builder already exists
+          if docker buildx ls | grep -q "^cloud-builder "; then
+            echo "Cloud builder already exists, using existing builder"
+            docker buildx use cloud-builder
+          else
+            echo "Creating new cloud builder"
+            docker buildx create --driver cloud zx8086/cldbuild --name cloud-builder --use
+          fi
           docker buildx ls
 
       - name: Cache Bun dependencies
