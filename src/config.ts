@@ -273,14 +273,19 @@ function parseEnvVar(
 	value: string | undefined,
 	type: "string" | "number" | "boolean" | "array",
 ): unknown {
-	if (value === undefined) return undefined;
-	if (type === "number") return Number(value);
+	if (value === undefined || value === "") return undefined;
+	if (type === "number") {
+		const num = Number(value);
+		return isNaN(num) ? undefined : num;
+	}
 	if (type === "boolean") return value.toLowerCase() === "true";
-	if (type === "array")
-		return value
+	if (type === "array") {
+		const arr = value
 			.split(",")
 			.map((s) => s.trim())
 			.filter((s) => s.length > 0);
+		return arr.length > 0 ? arr : undefined;
+	}
 	return value;
 }
 
@@ -304,8 +309,19 @@ function loadConfigFromEnv(): Partial<Config> {
 		return parseEnvVar(value, type);
 	};
 
+	// Helper function to filter out undefined values
+	const filterUndefined = (obj: Record<string, any>) => {
+		const filtered: Record<string, any> = {};
+		for (const [key, value] of Object.entries(obj)) {
+			if (value !== undefined) {
+				filtered[key] = value;
+			}
+		}
+		return filtered;
+	};
+
 	// Load Elasticsearch config
-	envConfig.elasticsearch = {
+	envConfig.elasticsearch = filterUndefined({
 		node: getEnvConfig(envVarMapping.elasticsearch.node, "string"),
 		apiKeyId: getEnvConfig(envVarMapping.elasticsearch.apiKeyId, "string"),
 		apiKey: getEnvConfig(envVarMapping.elasticsearch.apiKey, "string"),
@@ -331,10 +347,10 @@ function loadConfigFromEnv(): Partial<Config> {
 			envVarMapping.elasticsearch.opaqueIdPrefix,
 			"string",
 		),
-	};
+	});
 
 	// Load Kafka config
-	envConfig.kafka = {
+	envConfig.kafka = filterUndefined({
 		clientId: getEnvConfig(envVarMapping.kafka.clientId, "string"),
 		brokers: getEnvConfig(envVarMapping.kafka.brokers, "array"),
 		ssl: getEnvConfig(envVarMapping.kafka.ssl, "boolean"),
@@ -356,10 +372,10 @@ function loadConfigFromEnv(): Partial<Config> {
 		retries: getEnvConfig(envVarMapping.kafka.retries, "number"),
 		topicName: getEnvConfig(envVarMapping.kafka.topicName, "string"),
 		maxMessageSize: getEnvConfig(envVarMapping.kafka.maxMessageSize, "number"),
-	};
+	});
 
 	// Load Extraction config
-	envConfig.extraction = {
+	envConfig.extraction = filterUndefined({
 		intervalMinutes: getEnvConfig(
 			envVarMapping.extraction.intervalMinutes,
 			"number",
@@ -372,19 +388,19 @@ function loadConfigFromEnv(): Partial<Config> {
 			envVarMapping.extraction.monitorNamePattern,
 			"string",
 		),
-	};
+	});
 
 	// Load Logging config
-	envConfig.logging = {
+	envConfig.logging = filterUndefined({
 		level: getEnvConfig(envVarMapping.logging.level, "string"),
 		format: getEnvConfig(envVarMapping.logging.format, "string"),
 		includeTimestamp: getEnvConfig(
 			envVarMapping.logging.includeTimestamp,
 			"boolean",
 		),
-	};
+	});
 
-	envConfig.metrics = {
+	envConfig.metrics = filterUndefined({
 		enabled: getEnvConfig(envVarMapping.metrics.enabled, "boolean"),
 		port: getEnvConfig(envVarMapping.metrics.port, "number"),
 		prefix: getEnvConfig(envVarMapping.metrics.prefix, "string"),
@@ -392,14 +408,14 @@ function loadConfigFromEnv(): Partial<Config> {
 	};
 
 	// Load API config
-	envConfig.api = {
+	envConfig.api = filterUndefined({
 		enabled: getEnvConfig(envVarMapping.api.enabled, "boolean"),
 		invalidRecordsEndpoint: getEnvConfig(
 			envVarMapping.api.invalidRecordsEndpoint,
 			"string",
 		),
 		uiEndpoint: getEnvConfig(envVarMapping.api.uiEndpoint, "string"),
-		rateLimit: {
+		rateLimit: filterUndefined({
 			enabled: getEnvConfig(envVarMapping.api.rateLimit.enabled, "boolean"),
 			windowMs: getEnvConfig(envVarMapping.api.rateLimit.windowMs, "number"),
 			maxRequests: getEnvConfig(
@@ -414,11 +430,11 @@ function loadConfigFromEnv(): Partial<Config> {
 				envVarMapping.api.rateLimit.skipFailedRequests,
 				"boolean",
 			),
-		},
+		}),
 	};
 
 	// Load OpenTelemetry config
-	envConfig.openTelemetry = {
+	envConfig.openTelemetry = filterUndefined({
 		enabled: getEnvConfig(envVarMapping.openTelemetry.enabled, "boolean"),
 		tracesEndpoint: getEnvConfig(
 			envVarMapping.openTelemetry.tracesEndpoint,
@@ -456,7 +472,7 @@ function loadConfigFromEnv(): Partial<Config> {
 			envVarMapping.openTelemetry.summaryLogInterval,
 			"number",
 		),
-	};
+	});
 
 	// Load NodeEnv
 	envConfig.nodeEnv = getEnvConfig(envVarMapping.nodeEnv, "string");

@@ -266,7 +266,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: github.event_name != 'pull_request'
         with:
-          name: sbom-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          name: anchore-sbom-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
           path: sbom.spdx.json
         continue-on-error: true
 
