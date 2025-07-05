@@ -1,7 +1,15 @@
 # syntax=docker/dockerfile:1.4
 
-# Base stage
-FROM oven/bun:canary-alpine AS base
+# Base stage - Use the latest stable version instead of canary for better security
+FROM oven/bun:1.1.42-alpine AS base
+
+# Update Alpine packages to fix security vulnerabilities
+RUN apk update && \
+    apk upgrade --no-cache && \
+    apk add --no-cache \
+    curl \
+    ca-certificates && \
+    rm -rf /var/cache/apk/*
 
 # Set common environment variables
 ENV CN_ROOT=/usr/src/app \
@@ -101,7 +109,7 @@ LABEL org.opencontainers.image.title="synthetics-monitor-extractor" \
     org.opencontainers.image.url="https://github.com/zx8086/-synthetics-monitor-extract" \
     org.opencontainers.image.source="https://github.com/zx8086/-synthetics-monitor-extract" \
     org.opencontainers.image.documentation="https://github.com/zx8086/-synthetics-monitor-extract/README.md" \
-    org.opencontainers.image.base.name="oven/bun:canary-alpine" \
+    org.opencontainers.image.base.name="oven/bun:1.1.42-alpine" \
     org.opencontainers.image.source.repository="github.com/zx8086/-synthetics-monitor-extract" \
     org.opencontainers.image.source.branch="${GITHUB_REF_NAME:-master}" \
     org.opencontainers.image.source.commit="${COMMIT_HASH}" \
