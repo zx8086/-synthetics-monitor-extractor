@@ -57,7 +57,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          snyk_token: ${{ secrets.SNYK_TOKEN }}
           cosign_version: ${{ env.COSIGN_VERSION }}
           syft_version: ${{ env.SYFT_VERSION }}
 
@@ -88,98 +87,56 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-bun-
 
-      # Install and set up Snyk CLI as the primary method
-      # Snyk is now installed and authenticated in the setup-environment action
-
-      - name: Run Snyk to check for vulnerabilities
-        run: |
-          # Create directory for reports
-          mkdir -p snyk-reports
-
-          # Run vulnerability test
-          echo "Running Snyk vulnerability scan..."
-          snyk test --severity-threshold=high --json > snyk-reports/snyk-results.json || true
-          snyk test --severity-threshold=high --sarif-file-output=snyk-reports/snyk-results.sarif || true
-
-          # Run code scanning
-          echo "Running Snyk code scan..."
-          snyk code test --severity-threshold=high --json > snyk-reports/snyk-code-results.json || true
-          snyk code test --severity-threshold=high --sarif-file-output=snyk-reports/snyk-code-results.sarif || true
-
-          # List generated files
-          echo "Generated report files:"
-          ls -la snyk-reports/ || true
+      - name: Snyk vulnerability scan
+        uses: snyk/actions/node@master
+        with:
+          args: --severity-threshold=high --sarif-file-output=snyk-results.sarif
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         continue-on-error: true
 
-      # Check if the CLI approach failed to generate valid SARIF files
-      - name: Check Snyk CLI results
-        id: check-cli
-        run: |
-          if [ -s "snyk-reports/snyk-results.sarif" ] && [ -s "snyk-reports/snyk-code-results.sarif" ]; then
-            echo "CLI approach succeeded"
-            echo "cli_success=true" >> $GITHUB_OUTPUT
-          else
-            echo "CLI approach failed or produced empty results"
-            echo "cli_success=false" >> $GITHUB_OUTPUT
-          fi
-
-      # Use GitHub Action as fallback if CLI approach failed
-      - name: Snyk vulnerability scan (GitHub Action - Fallback)
-        if: steps.check-cli.outputs.cli_success != 'true'
+      - name: Snyk code scan
         uses: snyk/actions/node@master
         with:
-          args: --severity-threshold=high --sarif-file-output=snyk-action-results.sarif
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        continue-on-error: true
-
-      - name: Snyk code scan (GitHub Action - Fallback)
-        if: steps.check-cli.outputs.cli_success != 'true'
-        uses: snyk/actions/node@master
-        with:
-          args: code test --severity-threshold=high --sarif-file-output=snyk-action-code-results.sarif
+          args: code test --severity-threshold=high --sarif-file-output=snyk-code-results.sarif
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         continue-on-error: true
 
       - name: Upload Snyk vulnerability results to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
-        if: github.event_name != 'pull_request' && (hashFiles('snyk-reports/snyk-results.sarif') != '' || hashFiles('snyk-action-results.sarif') != '')
+        if: github.event_name != 'pull_request' && hashFiles('snyk-results.sarif') != ''
         with:
-          sarif_file: ${{ steps.check-cli.outputs.cli_success == 'true' && 'snyk-reports/snyk-results.sarif' || 'snyk-action-results.sarif' }}
+          sarif_file: snyk-results.sarif
           wait-for-processing: true
           category: snyk-vulnerability
         continue-on-error: true
 
       - name: Upload Snyk code results to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
-        if: github.event_name != 'pull_request' && (hashFiles('snyk-reports/snyk-code-results.sarif') != '' || hashFiles('snyk-action-code-results.sarif') != '')
+        if: github.event_name != 'pull_request' && hashFiles('snyk-code-results.sarif') != ''
         with:
-          sarif_file: ${{ steps.check-cli.outputs.cli_success == 'true' && 'snyk-reports/snyk-code-results.sarif' || 'snyk-action-code-results.sarif' }}
+          sarif_file: snyk-code-results.sarif
           wait-for-processing: true
           category: snyk-code
         continue-on-error: true
 
-      # Add summary of Snyk scanning status
       - name: Snyk scan summary
         run: |
           echo "## Snyk Security Scanning Summary" >> $GITHUB_STEP_SUMMARY
 
           echo "### Environment Information" >> $GITHUB_STEP_SUMMARY
           echo "- Architecture: $(uname -m)" >> $GITHUB_STEP_SUMMARY
-          echo "- Snyk Version: $(snyk --version 2>/dev/null || echo 'Not available')" >> $GITHUB_STEP_SUMMARY
-          echo "- Method used: ${{ steps.check-cli.outputs.cli_success == 'true' && 'CLI' || 'GitHub Action' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Method used: GitHub Actions" >> $GITHUB_STEP_SUMMARY
 
           echo "### Scan Results" >> $GITHUB_STEP_SUMMARY
-          if [ -f "snyk-reports/snyk-results.sarif" ] || [ -f "snyk-action-results.sarif" ]; then
+          if [ -f "snyk-results.sarif" ]; then
             echo "✅ Vulnerability scanning completed" >> $GITHUB_STEP_SUMMARY
           else
             echo "⚠️ Vulnerability scanning failed" >> $GITHUB_STEP_SUMMARY
           fi
 
-          if [ -f "snyk-reports/snyk-code-results.sarif" ] || [ -f "snyk-action-code-results.sarif" ]; then
+          if [ -f "snyk-code-results.sarif" ]; then
             echo "✅ Code scanning completed" >> $GITHUB_STEP_SUMMARY
           else
             echo "⚠️ Code scanning failed" >> $GITHUB_STEP_SUMMARY
@@ -519,13 +476,13 @@ jobs:
             echo "|-----------|--------|"
             
             # Check for SARIF files
-            if [ -f "snyk-reports/snyk-results.sarif" ] || [ -f "snyk-action-results.sarif" ]; then
+            if [ -f "snyk-results.sarif" ]; then
               echo "| 🔍 Vulnerability Scan | ✅ Completed |"
             else
               echo "| 🔍 Vulnerability Scan | ⚠️ Failed |"
             fi
             
-            if [ -f "snyk-reports/snyk-code-results.sarif" ] || [ -f "snyk-action-code-results.sarif" ]; then
+            if [ -f "snyk-code-results.sarif" ]; then
               echo "| 🔎 Code Scan | ✅ Completed |"
             else
               echo "| 🔎 Code Scan | ⚠️ Failed |"
@@ -572,11 +529,9 @@ jobs:
           docker container rm -f synthetics-monitor-test 2>/dev/null || true
           
           # Clean up temporary files
-          rm -rf snyk-reports/ || true
           rm -rf sbom-output/ || true
           rm -rf "${{ env.ATTESTATION_RESULTS_DIR }}" || true
           rm -f snyk-*.sarif || true
-          rm -f snyk-*.json || true
           rm -f sbom.spdx.json || true
           
           # Docker cleanup

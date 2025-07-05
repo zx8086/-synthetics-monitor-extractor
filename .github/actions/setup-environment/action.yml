@@ -1,9 +1,6 @@
 name: "Setup Environment"
-description: "Setup Bun, Snyk, verification tools (Cosign, Syft), and environment for synthetics-monitor-extractor"
+description: "Setup Bun, verification tools (Cosign, Syft), and environment for synthetics-monitor-extractor"
 inputs:
-  snyk_token:
-    description: "Snyk API token for authentication"
-    required: false
   cosign_version:
     description: "Cosign version to install"
     required: false
@@ -31,32 +28,6 @@ runs:
       run: |
         bun install --frozen-lockfile
 
-    - name: Install and setup Snyk
-      shell: bash
-      run: |
-        echo "Installing Snyk CLI via Bun..."
-        # Install Snyk globally using Bun
-        bun install -g snyk
-
-        # Verify installation
-        if snyk --version; then
-          echo "Snyk CLI installed successfully"
-        else
-          echo "Failed to install Snyk CLI via Bun"
-        fi
-      continue-on-error: true
-
-    - name: Authenticate with Snyk
-      shell: bash
-      run: |
-        if [ -n "${{ inputs.snyk_token }}" ]; then
-          echo "Authenticating with Snyk..."
-          snyk auth ${{ inputs.snyk_token }}
-          echo "Authentication completed"
-        else
-          echo "SNYK_TOKEN not provided. Skipping Snyk authentication."
-        fi
-      continue-on-error: true
 
     - name: Setup verification tools
       shell: bash
