@@ -108,3 +108,32 @@ runs:
         echo "OPEN_TELEMETRY_SERVICE_NAME=synthetics-monitor-extractor" >> $GITHUB_ENV
         echo "OPEN_TELEMETRY_SERVICE_VERSION=1.0.0" >> $GITHUB_ENV
         echo "OPEN_TELEMETRY_DEPLOYMENT_ENVIRONMENT=production" >> $GITHUB_ENV
+
+    - name: Configure Snyk for faster scans
+      shell: bash
+      run: |
+        # Create .snyk configuration file to exclude unnecessary files
+        cat > .snyk << 'EOF'
+# Snyk configuration file
+# Exclude files and directories from scanning
+exclude:
+  global:
+    - "**/*.test.ts"
+    - "**/*.spec.ts"
+    - "**/test/**"
+    - "**/tests/**"
+    - "**/docs/**"
+    - "**/*.md"
+    - "**/examples/**"
+    - "**/coverage/**"
+    - "**/dist/**"
+    - "**/build/**"
+    - "**/.github/**"
+    - "**/node_modules/**"
+
+# Language settings
+language-settings:
+  node:
+    enableLsp: true
+EOF
+        echo "✅ Snyk configuration created"

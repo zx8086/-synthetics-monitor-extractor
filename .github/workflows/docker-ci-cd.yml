@@ -87,66 +87,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-bun-
 
-      - name: Snyk vulnerability scan
-        uses: snyk/actions/node@master
-        with:
-          args: --severity-threshold=high --sarif-file-output=snyk-results.sarif
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        continue-on-error: true
-
-      - name: Snyk code scan
-        uses: snyk/actions/node@master
-        with:
-          args: code test --severity-threshold=high --sarif-file-output=snyk-code-results.sarif
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        continue-on-error: true
-
-      - name: Upload Snyk vulnerability results to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
-        if: github.event_name != 'pull_request' && hashFiles('snyk-results.sarif') != ''
-        with:
-          sarif_file: snyk-results.sarif
-          wait-for-processing: true
-          category: snyk-vulnerability
-        continue-on-error: true
-
-      - name: Upload Snyk code results to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
-        if: github.event_name != 'pull_request' && hashFiles('snyk-code-results.sarif') != ''
-        with:
-          sarif_file: snyk-code-results.sarif
-          wait-for-processing: true
-          category: snyk-code
-        continue-on-error: true
-
-      - name: Snyk scan summary
-        run: |
-          echo "## Snyk Security Scanning Summary" >> $GITHUB_STEP_SUMMARY
-
-          echo "### Environment Information" >> $GITHUB_STEP_SUMMARY
-          echo "- Architecture: $(uname -m)" >> $GITHUB_STEP_SUMMARY
-          echo "- Method used: GitHub Actions" >> $GITHUB_STEP_SUMMARY
-
-          echo "### Scan Results" >> $GITHUB_STEP_SUMMARY
-          if [ -f "snyk-results.sarif" ]; then
-            echo "✅ Vulnerability scanning completed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ Vulnerability scanning failed" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ -f "snyk-code-results.sarif" ]; then
-            echo "✅ Code scanning completed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ Code scanning failed" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "View results in the Security tab of this repository" >> $GITHUB_STEP_SUMMARY
-        continue-on-error: true
-
-      # Removed fallback SARIF generation as the GitHub Action handles this reliably
+      # Security scanning moved to separate workflow for better performance
+      # See .github/workflows/security-scan.yml
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -475,24 +417,15 @@ jobs:
             echo "| Scan Type | Status |"
             echo "|-----------|--------|"
             
-            # Check for SARIF files
-            if [ -f "snyk-results.sarif" ]; then
-              echo "| 🔍 Vulnerability Scan | ✅ Completed |"
-            else
-              echo "| 🔍 Vulnerability Scan | ⚠️ Failed |"
-            fi
-            
-            if [ -f "snyk-code-results.sarif" ]; then
-              echo "| 🔎 Code Scan | ✅ Completed |"
-            else
-              echo "| 🔎 Code Scan | ⚠️ Failed |"
-            fi
-            
+            # Container scan status
             if [ -f "snyk-container.sarif" ]; then
               echo "| 📦 Container Scan | ✅ Completed |"
             else
               echo "| 📦 Container Scan | ⚠️ Failed |"
             fi
+            
+            echo ""
+            echo "ℹ️ Additional security scans run in separate workflow"
             
             echo ""
             echo "#### 📋 Supply Chain Security"
@@ -531,7 +464,7 @@ jobs:
           # Clean up temporary files
           rm -rf sbom-output/ || true
           rm -rf "${{ env.ATTESTATION_RESULTS_DIR }}" || true
-          rm -f snyk-*.sarif || true
+          rm -f snyk-container.sarif || true
           rm -f sbom.spdx.json || true
           
           # Docker cleanup
