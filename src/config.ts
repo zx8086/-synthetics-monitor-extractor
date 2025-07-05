@@ -445,28 +445,31 @@ function loadConfigFromEnv(): Partial<Config> {
       envVarMapping.extraction.monitorNamePattern,
       "string",
     ),
-    batchProcessing: filterUndefined({
-      enabled: getEnvConfig(
-        envVarMapping.extraction.batchProcessing.enabled,
-        "boolean",
-      ),
-      batchSize: getEnvConfig(
-        envVarMapping.extraction.batchProcessing.batchSize,
-        "number",
-      ),
-      maxConcurrency: getEnvConfig(
-        envVarMapping.extraction.batchProcessing.maxConcurrency,
-        "number",
-      ),
-      streamingThreshold: getEnvConfig(
-        envVarMapping.extraction.batchProcessing.streamingThreshold,
-        "number",
-      ),
-      retryAttempts: getEnvConfig(
-        envVarMapping.extraction.batchProcessing.retryAttempts,
-        "number",
-      ),
-    }),
+    ...(() => {
+      const batchConfig = filterUndefined({
+        enabled: getEnvConfig(
+          envVarMapping.extraction.batchProcessing.enabled,
+          "boolean",
+        ),
+        batchSize: getEnvConfig(
+          envVarMapping.extraction.batchProcessing.batchSize,
+          "number",
+        ),
+        maxConcurrency: getEnvConfig(
+          envVarMapping.extraction.batchProcessing.maxConcurrency,
+          "number",
+        ),
+        streamingThreshold: getEnvConfig(
+          envVarMapping.extraction.batchProcessing.streamingThreshold,
+          "number",
+        ),
+        retryAttempts: getEnvConfig(
+          envVarMapping.extraction.batchProcessing.retryAttempts,
+          "number",
+        ),
+      });
+      return Object.keys(batchConfig).length > 0 ? { batchProcessing: batchConfig } : {};
+    })(),
   });
 
   // Load Logging config
@@ -477,13 +480,19 @@ function loadConfigFromEnv(): Partial<Config> {
       envVarMapping.logging.includeTimestamp,
       "boolean",
     ),
-    console: filterUndefined({
-      enabled: getEnvConfig(envVarMapping.logging.console.enabled, "boolean"),
-      level: getEnvConfig(envVarMapping.logging.console.level, "string"),
-    }),
-    opentelemetry: filterUndefined({
-      level: getEnvConfig(envVarMapping.logging.opentelemetry.level, "string"),
-    }),
+    ...(() => {
+      const consoleConfig = filterUndefined({
+        enabled: getEnvConfig(envVarMapping.logging.console.enabled, "boolean"),
+        level: getEnvConfig(envVarMapping.logging.console.level, "string"),
+      });
+      return Object.keys(consoleConfig).length > 0 ? { console: consoleConfig } : {};
+    })(),
+    ...(() => {
+      const otelConfig = filterUndefined({
+        level: getEnvConfig(envVarMapping.logging.opentelemetry.level, "string"),
+      });
+      return Object.keys(otelConfig).length > 0 ? { opentelemetry: otelConfig } : {};
+    })(),
   });
 
   envConfig.metrics = filterUndefined({
@@ -501,22 +510,25 @@ function loadConfigFromEnv(): Partial<Config> {
       "string",
     ),
     uiEndpoint: getEnvConfig(envVarMapping.api.uiEndpoint, "string"),
-    rateLimit: filterUndefined({
-      enabled: getEnvConfig(envVarMapping.api.rateLimit.enabled, "boolean"),
-      windowMs: getEnvConfig(envVarMapping.api.rateLimit.windowMs, "number"),
-      maxRequests: getEnvConfig(
-        envVarMapping.api.rateLimit.maxRequests,
-        "number",
-      ),
-      skipSuccessfulRequests: getEnvConfig(
-        envVarMapping.api.rateLimit.skipSuccessfulRequests,
-        "boolean",
-      ),
-      skipFailedRequests: getEnvConfig(
-        envVarMapping.api.rateLimit.skipFailedRequests,
-        "boolean",
-      ),
-    }),
+    ...(() => {
+      const rateLimitConfig = filterUndefined({
+        enabled: getEnvConfig(envVarMapping.api.rateLimit.enabled, "boolean"),
+        windowMs: getEnvConfig(envVarMapping.api.rateLimit.windowMs, "number"),
+        maxRequests: getEnvConfig(
+          envVarMapping.api.rateLimit.maxRequests,
+          "number",
+        ),
+        skipSuccessfulRequests: getEnvConfig(
+          envVarMapping.api.rateLimit.skipSuccessfulRequests,
+          "boolean",
+        ),
+        skipFailedRequests: getEnvConfig(
+          envVarMapping.api.rateLimit.skipFailedRequests,
+          "boolean",
+        ),
+      });
+      return Object.keys(rateLimitConfig).length > 0 ? { rateLimit: rateLimitConfig } : {};
+    })(),
   });
 
   // Load OpenTelemetry config
@@ -563,42 +575,17 @@ function loadConfigFromEnv(): Partial<Config> {
   // Load NodeEnv
   envConfig.nodeEnv = getEnvConfig(envVarMapping.nodeEnv, "string");
 
-  // Use Zod to validate and transform the config
+  // Use Zod to validate and transform the config - let schema defaults handle missing nested objects
   const result = ConfigSchema.safeParse({
     elasticsearch: {
       ...defaultConfig.elasticsearch,
       ...envConfig.elasticsearch,
     },
     kafka: { ...defaultConfig.kafka, ...envConfig.kafka },
-    extraction: {
-      ...defaultConfig.extraction,
-      ...envConfig.extraction,
-      batchProcessing: {
-        ...defaultConfig.extraction.batchProcessing,
-        ...(envConfig.extraction?.batchProcessing || {}),
-      },
-    },
-    logging: {
-      ...defaultConfig.logging,
-      ...envConfig.logging,
-      console: {
-        ...defaultConfig.logging.console,
-        ...(envConfig.logging?.console || {}),
-      },
-      opentelemetry: {
-        ...defaultConfig.logging.opentelemetry,
-        ...(envConfig.logging?.opentelemetry || {}),
-      },
-    },
+    extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
+    logging: { ...defaultConfig.logging, ...envConfig.logging },
     metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
-    api: {
-      ...defaultConfig.api,
-      ...envConfig.api,
-      rateLimit: {
-        ...defaultConfig.api.rateLimit,
-        ...(envConfig.api?.rateLimit || {}),
-      },
-    },
+    api: { ...defaultConfig.api, ...envConfig.api },
     openTelemetry: {
       ...defaultConfig.openTelemetry,
       ...envConfig.openTelemetry,
@@ -724,35 +711,10 @@ try {
       ...envConfig.elasticsearch,
     },
     kafka: { ...defaultConfig.kafka, ...envConfig.kafka },
-    extraction: {
-      ...defaultConfig.extraction,
-      ...envConfig.extraction,
-      batchProcessing: {
-        ...defaultConfig.extraction.batchProcessing,
-        ...(envConfig.extraction?.batchProcessing || {}),
-      },
-    },
-    logging: {
-      ...defaultConfig.logging,
-      ...envConfig.logging,
-      console: {
-        ...defaultConfig.logging.console,
-        ...(envConfig.logging?.console || {}),
-      },
-      opentelemetry: {
-        ...defaultConfig.logging.opentelemetry,
-        ...(envConfig.logging?.opentelemetry || {}),
-      },
-    },
+    extraction: { ...defaultConfig.extraction, ...envConfig.extraction },
+    logging: { ...defaultConfig.logging, ...envConfig.logging },
     metrics: { ...defaultConfig.metrics, ...envConfig.metrics },
-    api: {
-      ...defaultConfig.api,
-      ...envConfig.api,
-      rateLimit: {
-        ...defaultConfig.api.rateLimit,
-        ...(envConfig.api?.rateLimit || {}),
-      },
-    },
+    api: { ...defaultConfig.api, ...envConfig.api },
     openTelemetry: {
       ...defaultConfig.openTelemetry,
       ...envConfig.openTelemetry,
