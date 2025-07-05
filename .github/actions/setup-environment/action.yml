@@ -111,30 +111,30 @@ runs:
 
     - name: Configure Snyk for faster scans
       shell: bash
+      continue-on-error: true
       run: |
         # Create .snyk configuration file to exclude unnecessary files
-        cat > .snyk << 'EOF'
-# Snyk configuration file
-# Exclude files and directories from scanning
-exclude:
-  global:
-    - "**/*.test.ts"
-    - "**/*.spec.ts"
-    - "**/test/**"
-    - "**/tests/**"
-    - "**/docs/**"
-    - "**/*.md"
-    - "**/examples/**"
-    - "**/coverage/**"
-    - "**/dist/**"
-    - "**/build/**"
-    - "**/.github/**"
-    - "**/node_modules/**"
-
-# Language settings
-language-settings:
-  node:
-    enableLsp: true
-EOF
+        cat > .snyk << 'SNYK_CONFIG_EOF'
+        # Snyk configuration file
+        # Exclude files and directories from scanning
+        exclude:
+          global:
+            - "**/*.test.ts"
+            - "**/*.spec.ts"
+            - "**/test/**"
+            - "**/tests/**"
+            - "**/docs/**"
+            - "**/*.md"
+            - "**/examples/**"
+            - "**/coverage/**"
+            - "**/dist/**"
+            - "**/build/**"
+            - "**/.github/**"
+            - "**/node_modules/**"
+        
+        # Language settings
+        language-settings:
+          node:
+            enableLsp: true
+        SNYK_CONFIG_EOF
         echo "✅ Snyk configuration created"
-      continue-on-error: true
