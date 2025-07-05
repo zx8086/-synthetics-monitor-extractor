@@ -193,7 +193,11 @@
         
         if (data.length === 0) {
           const row = document.createElement('tr');
-          row.innerHTML = '<td colspan="4" style="text-align: center;">No error records found</td>';
+          const cell = document.createElement('td');
+          cell.colSpan = 4;
+          cell.style.textAlign = 'center';
+          cell.textContent = 'No error records found';
+          row.appendChild(cell);
           tbody.appendChild(row);
           return;
         }
@@ -201,12 +205,28 @@
         // Populate the summary table
         data.forEach(item => {
           const row = document.createElement('tr');
-          row.innerHTML = `
-            <td><span class="type-badge badge-${getBadgeClass(item.type)}">${item.type}</span></td>
-            <td>${item.monitor_count}</td>
-            <td>${item.error_count}</td>
-            <td>${formatDate(item.latest_error)}</td>
-          `;
+          
+          // Create cells using secure DOM methods
+          const typeCell = document.createElement('td');
+          const typeBadge = document.createElement('span');
+          typeBadge.className = `type-badge badge-${getBadgeClass(item.type)}`;
+          typeBadge.textContent = item.type;
+          typeCell.appendChild(typeBadge);
+          
+          const monitorCountCell = document.createElement('td');
+          monitorCountCell.textContent = item.monitor_count;
+          
+          const errorCountCell = document.createElement('td');
+          errorCountCell.textContent = item.error_count;
+          
+          const latestErrorCell = document.createElement('td');
+          latestErrorCell.textContent = formatDate(item.latest_error);
+          
+          row.appendChild(typeCell);
+          row.appendChild(monitorCountCell);
+          row.appendChild(errorCountCell);
+          row.appendChild(latestErrorCell);
+          
           tbody.appendChild(row);
         });
         
@@ -247,7 +267,11 @@
         
         if (data.length === 0) {
           const row = document.createElement('tr');
-          row.innerHTML = '<td colspan="7" style="text-align: center;">No matching error records found</td>';
+          const cell = document.createElement('td');
+          cell.colSpan = 7;
+          cell.style.textAlign = 'center';
+          cell.textContent = 'No matching error records found';
+          row.appendChild(cell);
           tbody.appendChild(row);
           return;
         }
@@ -257,19 +281,53 @@
           const row = document.createElement('tr');
           const showDeleteButton = isOlderThan48Hours(item.last_seen);
           
-          const deleteButtonHtml = showDeleteButton ? 
-            `<button class="delete-button" onclick="deleteRecord(${item.id})">Delete</button>` : 
-            '<span class="pending-delete">Not eligible for deletion yet</span>';
+          // Create cells using secure DOM methods
+          const typeCell = document.createElement('td');
+          const typeBadge = document.createElement('span');
+          typeBadge.className = `type-badge badge-${getBadgeClass(item.type)}`;
+          typeBadge.textContent = item.type;
+          typeCell.appendChild(typeBadge);
           
-          row.innerHTML = `
-            <td><span class="type-badge badge-${getBadgeClass(item.type)}">${item.type}</span></td>
-            <td>${item.monitor_name || '-'}</td>
-            <td>${escapeHtml(item.error_message)}</td>
-            <td>${formatDate(item.first_seen)}</td>
-            <td>${formatDate(item.last_seen)}</td>
-            <td><span class="counter">${item.count}</span></td>
-            <td>${deleteButtonHtml}</td>
-          `;
+          const monitorNameCell = document.createElement('td');
+          monitorNameCell.textContent = item.monitor_name || '-';
+          
+          const errorMessageCell = document.createElement('td');
+          errorMessageCell.textContent = item.error_message;
+          
+          const firstSeenCell = document.createElement('td');
+          firstSeenCell.textContent = formatDate(item.first_seen);
+          
+          const lastSeenCell = document.createElement('td');
+          lastSeenCell.textContent = formatDate(item.last_seen);
+          
+          const countCell = document.createElement('td');
+          const countSpan = document.createElement('span');
+          countSpan.className = 'counter';
+          countSpan.textContent = item.count;
+          countCell.appendChild(countSpan);
+          
+          const actionsCell = document.createElement('td');
+          if (showDeleteButton) {
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'delete-button';
+            deleteButton.textContent = 'Delete';
+            deleteButton.onclick = () => deleteRecord(item.id);
+            actionsCell.appendChild(deleteButton);
+          } else {
+            const pendingSpan = document.createElement('span');
+            pendingSpan.className = 'pending-delete';
+            pendingSpan.textContent = 'Not eligible for deletion yet';
+            actionsCell.appendChild(pendingSpan);
+          }
+          
+          row.appendChild(typeCell);
+          row.appendChild(monitorNameCell);
+          row.appendChild(errorMessageCell);
+          row.appendChild(firstSeenCell);
+          row.appendChild(lastSeenCell);
+          row.appendChild(countCell);
+          row.appendChild(actionsCell);
+          
           tbody.appendChild(row);
         });
       } catch (error) {
@@ -283,15 +341,23 @@
       return date.toLocaleString();
     }
     
-    // Helper function to get badge class
+    // Helper function to get badge class with input validation
     function getBadgeClass(type) {
-      if (type === 'monitor_transformation') return 'monitor_transformation';
-      if (type === 'elasticsearch_hits') return 'elasticsearch_hits';
-      if (type === 'business_context') return 'business_context';
-      return 'default';
+      // Validate input to prevent XSS through CSS class names
+      if (typeof type !== 'string') return 'default';
+      
+      // Only allow specific known values
+      const validTypes = {
+        'monitor_transformation': 'monitor_transformation',
+        'elasticsearch_hits': 'elasticsearch_hits',
+        'business_context': 'business_context'
+      };
+      
+      return validTypes[type] || 'default';
     }
     
-    // Helper function to escape HTML
+    // Helper function to escape HTML (no longer needed with secure DOM methods)
+    // Kept for backward compatibility if needed elsewhere
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
