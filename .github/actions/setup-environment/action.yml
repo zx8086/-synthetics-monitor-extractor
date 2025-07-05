@@ -92,7 +92,8 @@ runs:
 
         # Install syft
         echo "Installing Syft ${{ inputs.syft_version }}..."
-        curl -Lo syft.tar.gz "https://github.com/anchore/syft/releases/download/${{ inputs.syft_version }}/syft_${{ inputs.syft_version #v }}_linux_${ARCH_SUFFIX}.tar.gz"
+        SYFT_VERSION_NO_V=$(echo "${{ inputs.syft_version }}" | sed 's/^v//')
+        curl -Lo syft.tar.gz "https://github.com/anchore/syft/releases/download/${{ inputs.syft_version }}/syft_${SYFT_VERSION_NO_V}_linux_${ARCH_SUFFIX}.tar.gz"
         tar xzf syft.tar.gz syft
         mv syft "${GITHUB_WORKSPACE}/bin/"
 
