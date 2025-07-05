@@ -8,7 +8,7 @@
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
     "docker:build": "docker build -t synthetics-monitor-extractor .",
-    "docker:run": "docker run -p 3001:3001 synthetics-monitor-extractor",
+    "docker:run": "docker run -p 9090:9090 synthetics-monitor-extractor",
     "docker:security": "snyk container test synthetics-monitor-extractor --severity-threshold=high",
     "security:scan": "snyk test --severity-threshold=high",
     "security:scan:json": "snyk test --severity-threshold=high --json > snyk-results.json || true",
@@ -19,7 +19,7 @@
     "security:full": "bun run security:scan && bun run security:code && bun run security:scan:sarif && bun run security:code:sarif",
     "lint": "biome check ./src",
     "format": "biome format --write ./src",
-    "health": "curl -f http://localhost:3001/metrics || exit 1"
+    "health": "curl -f http://localhost:9090/metrics || exit 1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.0.6",

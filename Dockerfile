@@ -134,10 +134,10 @@ ENV ELASTICSEARCH_URL="" \
     METRICS_PORT=""
 
 USER bun
-EXPOSE 3001/tcp
+EXPOSE 9090/tcp
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3001/metrics || exit 1
+    CMD curl -f http://localhost:9090/metrics || exit 1
 
 CMD ["bun", "run", "dist/index.js"]
