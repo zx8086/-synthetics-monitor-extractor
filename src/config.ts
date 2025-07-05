@@ -65,7 +65,7 @@ const KafkaConfigSchema = z
   );
 
 const ExtractionConfigSchema = z.object({
-  intervalMinutes: z.number().min(1).max(60).default(2),
+  intervalMinutes: z.number().min(1).max(60).default(5),
   timeRange: z.string().default("now-5m"),
   maxResults: z.number().min(1).max(10000).default(1000),
   timeout: z.string().default("30s"),
@@ -73,11 +73,11 @@ const ExtractionConfigSchema = z.object({
   monitorNamePattern: z.string().default("*prd*"),
   batchProcessing: z
     .object({
-      enabled: z.boolean().default(true),
-      batchSize: z.number().min(10).max(1000).default(100),
-      maxConcurrency: z.number().min(1).max(10).default(4),
-      streamingThreshold: z.number().min(100).max(10000).default(500),
-      retryAttempts: z.number().min(0).max(5).default(2),
+      enabled: z.boolean(),
+      batchSize: z.number().min(10).max(1000),
+      maxConcurrency: z.number().min(1).max(10),
+      streamingThreshold: z.number().min(100).max(10000),
+      retryAttempts: z.number().min(0).max(5),
     })
     .default({
       enabled: true,
@@ -92,15 +92,21 @@ const LoggingConfigSchema = z.object({
   level: z.enum(["debug", "info", "warn", "error"]).default("info"),
   format: z.enum(["json", "text"]).default("json"),
   includeTimestamp: z.boolean().default(true),
-  console: z.object({
-    enabled: z.boolean().default(true),
-    level: z.enum(["debug", "info", "warn", "error"]).optional(),
-  }).default({
-    enabled: true,
-  }),
-  opentelemetry: z.object({
-    level: z.enum(["debug", "info", "warn", "error"]).optional(),
-  }).default({}),
+  console: z
+    .object({
+      enabled: z.boolean(),
+      level: z.enum(["debug", "info", "warn", "error"]).optional(),
+    })
+    .default({
+      enabled: true,
+    }),
+  opentelemetry: z
+    .object({
+      level: z.enum(["debug", "info", "warn", "error"]).optional(),
+    })
+    .default({
+      level: "info",
+    }),
 });
 
 const MetricsConfigSchema = z.object({
@@ -175,7 +181,7 @@ const defaultConfig: Config = {
     maxMessageSize: 5242880,
   },
   extraction: {
-    intervalMinutes: 10,
+    intervalMinutes: 5,
     timeRange: "now-5m",
     maxResults: 1000,
     timeout: "30s",
@@ -191,12 +197,14 @@ const defaultConfig: Config = {
   },
   logging: {
     level: "info",
-    format: "text",
+    format: "json",
     includeTimestamp: true,
     console: {
       enabled: true,
     },
-    opentelemetry: {},
+    opentelemetry: {
+      level: "info",
+    },
   },
   metrics: {
     enabled: true,
