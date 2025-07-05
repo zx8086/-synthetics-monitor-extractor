@@ -1,0 +1,77 @@
+# Git
+.git
+.gitignore
+.github
+
+# Node modules
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Bun
+.bun
+bun-debug.log*
+
+# Build outputs
+dist
+build
+*.log
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+coverage
+.nyc_output
+test-results
+
+# Docs
+README.md
+CHANGELOG.md
+docs
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Temporary files
+tmp
+temp
+*.tmp
+
+# Build artifacts
+*.tsbuildinfo
+.cache
+
+# Security scans
+snyk-*.sarif
+snyk-*.json
+trivy-*.sarif
+
+# SBOM files
+sbom-output
+*.sbom.json
+*.spdx.json
+*.cyclonedx.json
+
+# SQLite databases
+*.db
+*.sqlite
+data/
+
+# Logs directory (will be created at runtime)
+logs/
+
+# GitHub Actions
+.github/workflows
+.github/actions

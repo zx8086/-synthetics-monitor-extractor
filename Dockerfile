@@ -26,10 +26,11 @@ RUN mkdir -p /usr/src/app/logs /usr/src/app/deps/cache /usr/src/app/.sourcemaps 
 FROM base AS deps
 
 # Copy only package files needed for installation
-COPY --chown=bun:bun package.json bun.lock tsconfig.json ./
+COPY --chown=bun:bun package.json bun.lock ./
 
-# Single RUN command for better caching
-RUN --mount=type=cache,target=/root/.bun,sharing=locked \
+# Install production dependencies with cache mount
+RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
+    --mount=type=cache,target=/usr/src/app/.bun,sharing=locked \
     bun install --frozen-lockfile --production && \
     mkdir -p node_modules && \
     chown -R bun:bun node_modules
@@ -48,12 +49,15 @@ CMD ["bun", "run", "dev"]
 # Build stage
 FROM deps AS builder
 
-# Copy source files all at once
-COPY --chown=bun:bun src/ ./src/
+# Copy tsconfig first (changes less frequently)
 COPY --chown=bun:bun tsconfig.json ./
 
-# Combine mkdir and build operations
-RUN --mount=type=cache,target=/usr/src/app/.build \
+# Copy source files
+COPY --chown=bun:bun src/ ./src/
+
+# Build with cache mount for build artifacts
+RUN --mount=type=cache,target=/usr/src/app/.build,sharing=locked \
+    --mount=type=cache,target=/usr/src/app/.bun,sharing=locked \
     mkdir -p dist dist/maps && \
     bun build ./src/index.ts \
     --target=node \
@@ -68,28 +72,21 @@ RUN --mount=type=cache,target=/usr/src/app/.build \
 # Final release stage
 FROM base AS release
 
-# Copy package files and install dependencies in one layer
-COPY --chown=bun:bun package.json bun.lock ./
-RUN --mount=type=cache,target=/root/.bun,sharing=locked \
-    bun install --frozen-lockfile
+# Copy dependencies from deps stage
+COPY --from=deps --chown=bun:bun /usr/src/app/node_modules ./node_modules
+COPY --from=deps --chown=bun:bun /usr/src/app/package.json ./package.json
+COPY --from=deps --chown=bun:bun /usr/src/app/bun.lock ./bun.lock
 
-# Copy source files
-COPY --chown=bun:bun . .
+# Copy built files from builder stage
+COPY --from=builder --chown=bun:bun /usr/src/app/dist ./dist
 
-# Combine build operations into a single layer
-RUN set -e && \
-    bun build ./src/index.ts \
-    --target=node \
-    --outdir ./dist \
-    --sourcemap \
-    --external dns \
-    --external bun \
-    --external @platformatic/kafka \
-    --manifest && \
-    mkdir -p /usr/src/app/dist/maps && \
-    find /usr/src/app/dist -name "*.map" -exec mv {} /usr/src/app/dist/maps/ \; || true && \
-    bun install --frozen-lockfile --production && \
-    chown -R bun:bun .
+# Copy only necessary source files for runtime
+COPY --chown=bun:bun src/ ./src/
+COPY --chown=bun:bun tsconfig.json ./
+
+# Create required directories
+RUN mkdir -p /usr/src/app/data /usr/src/app/logs && \
+    chown -R bun:bun /usr/src/app
 
 # Set production variables
 ENV OPEN_TELEMETRY_ENABLED=true \
