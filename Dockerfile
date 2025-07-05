@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.4
 
 # Base stage - Use the latest stable version instead of canary for better security
-FROM oven/bun:1.2.16-alpine AS base
+FROM oven/bun:1.2.18-alpine AS base
 
 # Update Alpine packages to fix security vulnerabilities
 RUN apk update && \

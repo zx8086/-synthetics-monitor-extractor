@@ -23,7 +23,7 @@
     "health": "curl -f http://localhost:9090/metrics || exit 1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.0.6",
     "@types/bun": "^1.2.18",
     "@types/hapi__catbox": "^12.1.0",
     "@types/hapi__shot": "^6.0.0"
