@@ -14,6 +14,52 @@ bun run index.ts
 
 ## Environment Variables
 
+### Logging Configuration
+
+You can control logging output through multiple independent channels:
+
+#### Console Logging (stdout/stderr)
+```bash
+LOG_CONSOLE_ENABLED=true          # Enable/disable console output
+LOG_CONSOLE_LEVEL=info            # Set console-specific log level
+```
+
+#### OpenTelemetry Logging 
+```bash
+LOG_OPENTELEMETRY_ENABLED=true    # Enable OTEL logging (independent of OPEN_TELEMETRY_ENABLED)
+LOG_OPENTELEMETRY_LEVEL=debug     # Set OTEL-specific log level
+```
+
+#### Global Logging Settings
+```bash
+LOG_LEVEL=info                    # Default log level for all transports
+LOG_FORMAT=json                   # json or text format
+LOG_INCLUDE_TIMESTAMP=true        # Include timestamps
+```
+
+#### Common Production Scenarios
+
+**Console only (traditional setup):**
+```bash
+LOG_CONSOLE_ENABLED=true
+LOG_OPENTELEMETRY_ENABLED=false
+```
+
+**OpenTelemetry only (cloud-native):**
+```bash
+LOG_CONSOLE_ENABLED=false
+LOG_OPENTELEMETRY_ENABLED=true
+OPEN_TELEMETRY_LOGS_ENDPOINT=https://your-otel-collector:4318/v1/logs
+```
+
+**Both channels (development/debugging):**
+```bash
+LOG_CONSOLE_ENABLED=true
+LOG_OPENTELEMETRY_ENABLED=true
+LOG_CONSOLE_LEVEL=info
+LOG_OPENTELEMETRY_LEVEL=debug
+```
+
 ### UI Customization
 - `KAFKA_CLIENT_ID`: Besides its primary purpose for Kafka connection, this value is also used to customize the UI title.
   For example, setting `KAFKA_CLIENT_ID=my-monitoring-app` will result in a UI title of "My Monitoring App Monitor Errors".

@@ -28,7 +28,10 @@ function getLogger(): winston.Logger {
 		}
 
 		override async log(info: any, callback: () => void) {
-			if (config?.openTelemetry?.enabled) {
+			const otelEnabled = config?.logging?.opentelemetry?.enabled || 
+				(config?.logging?.opentelemetry?.enabled !== false && config?.openTelemetry?.enabled);
+			
+			if (otelEnabled) {
 				try {
 					// Debug: Log the actual endpoint being used
 					// eslint-disable-next-line no-console
@@ -164,25 +167,32 @@ function getLogger(): winston.Logger {
 
 	const transports: TransportStream[] = [];
 
-	// Always add console transport
-	transports.push(
-		new winston.transports.Console({
-			level: config?.logging?.level || "info",
-			format:
-				config?.logging?.format === "json"
-					? winston.format.json()
-					: winston.format.combine(
-							winston.format.colorize(),
-							winston.format.simple(),
-						),
-		}),
-	);
+	// Add console transport if enabled
+	if (config?.logging?.console?.enabled !== false) {
+		const consoleLevel = config?.logging?.console?.level || config?.logging?.level || "info";
+		transports.push(
+			new winston.transports.Console({
+				level: consoleLevel,
+				format:
+					config?.logging?.format === "json"
+						? winston.format.json()
+						: winston.format.combine(
+								winston.format.colorize(),
+								winston.format.simple(),
+							),
+			}),
+		);
+	}
 
-	// Add OpenTelemetry transport if enabled
-	if (config?.openTelemetry?.enabled) {
+	// Add OpenTelemetry transport if enabled (check both global and logging-specific settings)
+	const otelEnabled = config?.logging?.opentelemetry?.enabled || 
+		(config?.logging?.opentelemetry?.enabled !== false && config?.openTelemetry?.enabled);
+	
+	if (otelEnabled) {
 		try {
+			const otelLevel = config?.logging?.opentelemetry?.level || config?.logging?.level || "info";
 			const otelTransport = new OpenTelemetryHttpTransport({
-				level: config.logging.level,
+				level: otelLevel,
 			});
 			transports.push(otelTransport);
 		} catch (error) {

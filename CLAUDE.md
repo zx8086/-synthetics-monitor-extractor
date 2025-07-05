@@ -72,6 +72,35 @@ Set these required variables:
 - `KAFKA_BROKERS`: Comma-separated Kafka broker list
 - `OPEN_TELEMETRY_ENABLED`: Enable tracing (set to `true` for Elasticsearch visibility)
 
+### Logging Configuration
+The application supports independent control of logging channels:
+
+#### Console Logging
+- `LOG_CONSOLE_ENABLED=true/false` - Control stdout/stderr output
+- `LOG_CONSOLE_LEVEL=debug/info/warn/error` - Console-specific log level
+
+#### OpenTelemetry Logging  
+- `LOG_OPENTELEMETRY_ENABLED=true/false` - Send logs to OTEL endpoint
+- `LOG_OPENTELEMETRY_LEVEL=debug/info/warn/error` - OTEL-specific log level
+- Works independently of `OPEN_TELEMETRY_ENABLED` (which controls traces/metrics)
+
+#### Common Production Patterns
+```bash
+# Cloud-native: Only OpenTelemetry logs
+LOG_CONSOLE_ENABLED=false
+LOG_OPENTELEMETRY_ENABLED=true
+
+# Traditional: Only console logs  
+LOG_CONSOLE_ENABLED=true
+LOG_OPENTELEMETRY_ENABLED=false
+
+# Hybrid: Different log levels per channel
+LOG_CONSOLE_ENABLED=true
+LOG_CONSOLE_LEVEL=warn
+LOG_OPENTELEMETRY_ENABLED=true  
+LOG_OPENTELEMETRY_LEVEL=debug
+```
+
 ### Business Context Requirements
 The system enforces strict business context validation through monitor tags:
 - `domain:` - Business domain (required)

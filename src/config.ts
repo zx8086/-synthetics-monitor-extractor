@@ -92,6 +92,18 @@ const LoggingConfigSchema = z.object({
   level: z.enum(["debug", "info", "warn", "error"]).default("info"),
   format: z.enum(["json", "text"]).default("json"),
   includeTimestamp: z.boolean().default(true),
+  console: z.object({
+    enabled: z.boolean().default(true),
+    level: z.enum(["debug", "info", "warn", "error"]).optional(),
+  }).default({
+    enabled: true,
+  }),
+  opentelemetry: z.object({
+    enabled: z.boolean().default(false),
+    level: z.enum(["debug", "info", "warn", "error"]).optional(),
+  }).default({
+    enabled: false,
+  }),
 });
 
 const MetricsConfigSchema = z.object({
@@ -184,6 +196,12 @@ const defaultConfig: Config = {
     level: "info",
     format: "text",
     includeTimestamp: true,
+    console: {
+      enabled: true,
+    },
+    opentelemetry: {
+      enabled: false,
+    },
   },
   metrics: {
     enabled: true,
@@ -264,6 +282,14 @@ const envVarMapping = {
     level: "LOG_LEVEL",
     format: "LOG_FORMAT",
     includeTimestamp: "LOG_INCLUDE_TIMESTAMP",
+    console: {
+      enabled: "LOG_CONSOLE_ENABLED",
+      level: "LOG_CONSOLE_LEVEL",
+    },
+    opentelemetry: {
+      enabled: "LOG_OPENTELEMETRY_ENABLED",
+      level: "LOG_OPENTELEMETRY_LEVEL",
+    },
   },
   metrics: {
     enabled: "METRICS_ENABLED",
@@ -449,6 +475,14 @@ function loadConfigFromEnv(): Partial<Config> {
       envVarMapping.logging.includeTimestamp,
       "boolean",
     ),
+    console: filterUndefined({
+      enabled: getEnvConfig(envVarMapping.logging.console.enabled, "boolean"),
+      level: getEnvConfig(envVarMapping.logging.console.level, "string"),
+    }),
+    opentelemetry: filterUndefined({
+      enabled: getEnvConfig(envVarMapping.logging.opentelemetry.enabled, "boolean"),
+      level: getEnvConfig(envVarMapping.logging.opentelemetry.level, "string"),
+    }),
   });
 
   envConfig.metrics = filterUndefined({
@@ -704,6 +738,14 @@ try {
         logging: {
           level: config.logging.level,
           format: config.logging.format,
+          console: {
+            enabled: config.logging.console.enabled,
+            level: config.logging.console.level,
+          },
+          opentelemetry: {
+            enabled: config.logging.opentelemetry.enabled,
+            level: config.logging.opentelemetry.level,
+          },
         },
         metrics: {
           enabled: config.metrics.enabled,
