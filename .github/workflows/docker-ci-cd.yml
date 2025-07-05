@@ -133,6 +133,7 @@ jobs:
           image: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: spdx-json
           output-file: sbom.spdx.json
+          artifact-name: sbom-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
         continue-on-error: true
 
       - name: Upload SBOM
