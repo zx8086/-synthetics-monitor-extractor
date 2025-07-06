@@ -127,12 +127,11 @@ async function initializeOpenTelemetryInternal() {
 				config.openTelemetry.tracesEndpoint,
 			);
 			const { OTLPTraceExporter } = await import(
-				"@opentelemetry/exporter-trace-otlp-proto"
+				"@opentelemetry/exporter-trace-otlp-http"
 			);
 			const traceExporter = new OTLPTraceExporter({
 				url: config.openTelemetry.tracesEndpoint,
-				timeoutMillis: exporterTimeout,
-				headers: { "Content-Type": "application/x-protobuf" },
+				headers: { "Content-Type": "application/json" },
 				...commonConfig,
 			}) as unknown as SpanExporter;
 			log("DEBUG: Trace exporter created successfully");
@@ -146,13 +145,12 @@ async function initializeOpenTelemetryInternal() {
 				config.openTelemetry.logsEndpoint,
 			);
 			const { OTLPLogExporter } = await import(
-				"@opentelemetry/exporter-logs-otlp-proto"
+				"@opentelemetry/exporter-logs-otlp-http"
 			);
 			const logExporter = new OTLPLogExporter({
 				url: config.openTelemetry.logsEndpoint,
 				timeoutMillis: exporterTimeout,
-				headers: { "Content-Type": "application/x-protobuf" },
-				// Remove commonConfig that might cause logs export issues
+				headers: { "Content-Type": "application/json" },
 			}) as unknown as LogRecordExporter;
 			log("DEBUG: Log exporter created successfully");
 
@@ -162,12 +160,11 @@ async function initializeOpenTelemetryInternal() {
 			const loggerProvider = new LoggerProvider({
 				resource: resource,
 			});
-			loggerProvider.addLogRecordProcessor(
-				new BatchLogRecordProcessor(logExporter, {
-					exportTimeoutMillis: exporterTimeout,
-					// Use default batch sizes for optimal performance
-				}),
-			);
+			const logProcessor = new BatchLogRecordProcessor(logExporter, {
+				exportTimeoutMillis: exporterTimeout,
+				// Use default batch sizes for optimal performance
+			});
+			loggerProvider.addLogRecordProcessor(logProcessor);
 			log(
 				"DEBUG: Log provider registered successfully with BatchLogRecordProcessor timeout:",
 				exporterTimeout,
@@ -188,12 +185,12 @@ async function initializeOpenTelemetryInternal() {
 				config.openTelemetry.metricsEndpoint,
 			);
 			const { OTLPMetricExporter } = await import(
-				"@opentelemetry/exporter-metrics-otlp-proto"
+				"@opentelemetry/exporter-metrics-otlp-http"
 			);
 			const metricExporter = new OTLPMetricExporter({
 				url: config.openTelemetry.metricsEndpoint,
 				timeoutMillis: metricsExporterTimeout,
-				headers: { "Content-Type": "application/x-protobuf" },
+				headers: { "Content-Type": "application/json" },
 				concurrencyLimit: 1,
 			}) as unknown as PushMetricExporter;
 			log("DEBUG: OTLP metric exporter created successfully");
