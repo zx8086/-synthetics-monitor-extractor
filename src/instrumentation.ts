@@ -58,13 +58,13 @@ const createResource = async () => {
 	);
 };
 
-const exporterTimeout = 15000; // Increased timeout for network reliability
-const metricsExporterTimeout = 30000; // Longer timeout for metrics due to potentially larger payloads
+const exporterTimeout = 30000; // Increased timeout for network reliability
+const metricsExporterTimeout = 60000; // Longer timeout for metrics due to potentially larger payloads
 
 const commonConfig = {
 	timeoutMillis: exporterTimeout,
 	concurrencyLimit: 1, // Single request to avoid overwhelming endpoint
-	// Removed keepAlive for gRPC compatibility
+	keepAlive: true, // Keep connections alive to prevent timeout issues
 };
 
 export function initializeHttpMetrics() {
@@ -191,7 +191,7 @@ async function initializeOpenTelemetryInternal() {
 				url: config.openTelemetry.metricsEndpoint,
 				timeoutMillis: metricsExporterTimeout,
 				headers: { "Content-Type": "application/json" },
-				concurrencyLimit: 1,
+				...commonConfig,
 			}) as unknown as PushMetricExporter;
 			log("DEBUG: OTLP metric exporter created successfully");
 
