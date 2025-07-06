@@ -138,7 +138,7 @@ const OpenTelemetryConfigSchema = z.object({
 	serviceVersion: z.string().default("1.0.0"),
 	deploymentEnvironment: z.string().default("development"),
 	metricIntervalMs: z.number().min(1000).max(60000).default(15000),
-	metricReaderInterval: z.number().default(30000), // 30-second interval for smaller payloads
+	metricReaderInterval: z.number().default(120000), // 2-minute interval to reduce load on endpoints
 	summaryLogInterval: z.number().default(300000),
 });
 
@@ -233,7 +233,7 @@ const defaultConfig: Config = {
 		serviceVersion: "1.0.0",
 		deploymentEnvironment: "development",
 		metricIntervalMs: 15000,
-		metricReaderInterval: 60000,
+		metricReaderInterval: 120000,
 		summaryLogInterval: 300000,
 	},
 	nodeEnv: "development",

@@ -59,11 +59,12 @@ const createResource = async () => {
 };
 
 const exporterTimeout = 15000; // Increased timeout for network reliability
+const metricsExporterTimeout = 30000; // Longer timeout for metrics due to potentially larger payloads
 
 const commonConfig = {
 	timeoutMillis: exporterTimeout,
 	concurrencyLimit: 1, // Single request to avoid overwhelming endpoint
-	keepAlive: false, // Fresh connections to avoid stale connection timeouts
+	// Removed keepAlive for gRPC compatibility
 };
 
 export function initializeHttpMetrics() {
@@ -126,12 +127,12 @@ async function initializeOpenTelemetryInternal() {
 				config.openTelemetry.tracesEndpoint,
 			);
 			const { OTLPTraceExporter } = await import(
-				"@opentelemetry/exporter-trace-otlp-http"
+				"@opentelemetry/exporter-trace-otlp-proto"
 			);
 			const traceExporter = new OTLPTraceExporter({
 				url: config.openTelemetry.tracesEndpoint,
-				headers: { "Content-Type": "application/json" },
 				timeoutMillis: exporterTimeout,
+				headers: { "Content-Type": "application/x-protobuf" },
 				...commonConfig,
 			}) as unknown as SpanExporter;
 			log("DEBUG: Trace exporter created successfully");
@@ -145,12 +146,12 @@ async function initializeOpenTelemetryInternal() {
 				config.openTelemetry.logsEndpoint,
 			);
 			const { OTLPLogExporter } = await import(
-				"@opentelemetry/exporter-logs-otlp-http"
+				"@opentelemetry/exporter-logs-otlp-proto"
 			);
 			const logExporter = new OTLPLogExporter({
 				url: config.openTelemetry.logsEndpoint,
-				headers: { "Content-Type": "application/json" },
 				timeoutMillis: exporterTimeout,
+				headers: { "Content-Type": "application/x-protobuf" },
 				// Remove commonConfig that might cause logs export issues
 			}) as unknown as LogRecordExporter;
 			log("DEBUG: Log exporter created successfully");
@@ -187,20 +188,20 @@ async function initializeOpenTelemetryInternal() {
 				config.openTelemetry.metricsEndpoint,
 			);
 			const { OTLPMetricExporter } = await import(
-				"@opentelemetry/exporter-metrics-otlp-http"
+				"@opentelemetry/exporter-metrics-otlp-proto"
 			);
 			const metricExporter = new OTLPMetricExporter({
 				url: config.openTelemetry.metricsEndpoint,
-				headers: { "Content-Type": "application/json" },
-				timeoutMillis: exporterTimeout,
-				...commonConfig,
+				timeoutMillis: metricsExporterTimeout,
+				headers: { "Content-Type": "application/x-protobuf" },
+				concurrencyLimit: 1,
 			}) as unknown as PushMetricExporter;
 			log("DEBUG: OTLP metric exporter created successfully");
 
 			const periodicExportingMetricReader = new PeriodicExportingMetricReader({
 				exporter: metricExporter,
 				exportIntervalMillis: config.openTelemetry.metricReaderInterval,
-				exportTimeoutMillis: exporterTimeout,
+				exportTimeoutMillis: metricsExporterTimeout,
 			});
 
 			log(
@@ -252,9 +253,11 @@ async function initializeOpenTelemetryInternal() {
 				resource: resource,
 				traceExporter,
 				spanProcessors: [batchSpanProcessor],
-				logRecordProcessors: [new BatchLogRecordProcessor(logExporter, {
-					exportTimeoutMillis: exporterTimeout,
-				})],
+				logRecordProcessors: [
+					new BatchLogRecordProcessor(logExporter, {
+						exportTimeoutMillis: exporterTimeout,
+					}),
+				],
 				instrumentations: [
 					getNodeAutoInstrumentations({
 						"@opentelemetry/instrumentation-aws-lambda": { enabled: false },
@@ -459,4 +462,3 @@ export function recordKafkaMessage(topic: string, messageSize: number) {
 		}
 	}
 }
-
