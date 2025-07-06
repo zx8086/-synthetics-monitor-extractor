@@ -131,9 +131,9 @@ const ApiConfigSchema = z.object({
 
 const OpenTelemetryConfigSchema = z.object({
 	enabled: z.boolean().default(false),
-	tracesEndpoint: z.string().default("http://localhost:4318/v1/traces"),
-	metricsEndpoint: z.string().default("http://localhost:4318/v1/metrics"),
-	logsEndpoint: z.string().default("http://localhost:4318/v1/logs"),
+	tracesEndpoint: z.string().default("http://localhost:4317"),
+	metricsEndpoint: z.string().default("http://localhost:4317"),
+	logsEndpoint: z.string().default("http://localhost:4317"),
 	serviceName: z.string().default("synthetics-monitor-extractor"),
 	serviceVersion: z.string().default("1.0.0"),
 	deploymentEnvironment: z.string().default("development"),
@@ -226,9 +226,9 @@ const defaultConfig: Config = {
 	},
 	openTelemetry: {
 		enabled: false,
-		tracesEndpoint: "http://localhost:4318/v1/traces",
-		metricsEndpoint: "http://localhost:4318/v1/metrics",
-		logsEndpoint: "http://localhost:4318/v1/logs",
+		tracesEndpoint: "http://localhost:4317",
+		metricsEndpoint: "http://localhost:4317",
+		logsEndpoint: "http://localhost:4317",
 		serviceName: "synthetics-monitor-extractor",
 		serviceVersion: "1.0.0",
 		deploymentEnvironment: "development",

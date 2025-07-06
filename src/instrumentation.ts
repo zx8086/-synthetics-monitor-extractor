@@ -63,7 +63,7 @@ const exporterTimeout = 15000; // Increased timeout for network reliability
 const commonConfig = {
 	timeoutMillis: exporterTimeout,
 	concurrencyLimit: 1, // Single request to avoid overwhelming endpoint
-	keepAlive: false, // Fresh connections to avoid stale connection timeouts
+	// Removed keepAlive for gRPC compatibility
 };
 
 export function initializeHttpMetrics() {
@@ -125,13 +125,13 @@ async function initializeOpenTelemetryInternal() {
 				"DEBUG: Creating trace exporter with endpoint:",
 				config.openTelemetry.tracesEndpoint,
 			);
-			const { OTLPTraceExporter } = await import(
-				"@opentelemetry/exporter-trace-otlp-http"
+			const { OTLPTraceExporter, CompressionAlgorithm } = await import(
+				"@opentelemetry/exporter-trace-otlp-grpc"
 			);
 			const traceExporter = new OTLPTraceExporter({
 				url: config.openTelemetry.tracesEndpoint,
-				headers: { "Content-Type": "application/json" },
 				timeoutMillis: exporterTimeout,
+				compression: CompressionAlgorithm.GZIP,
 				...commonConfig,
 			}) as unknown as SpanExporter;
 			log("DEBUG: Trace exporter created successfully");
@@ -144,13 +144,12 @@ async function initializeOpenTelemetryInternal() {
 				"DEBUG: Creating log exporter with endpoint:",
 				config.openTelemetry.logsEndpoint,
 			);
-			const { OTLPLogExporter } = await import(
-				"@opentelemetry/exporter-logs-otlp-http"
-			);
+			const { OTLPLogExporter, CompressionAlgorithm: LogCompressionAlgorithm } =
+				await import("@opentelemetry/exporter-logs-otlp-grpc");
 			const logExporter = new OTLPLogExporter({
 				url: config.openTelemetry.logsEndpoint,
-				headers: { "Content-Type": "application/json" },
 				timeoutMillis: exporterTimeout,
+				compression: LogCompressionAlgorithm.GZIP,
 				// Remove commonConfig that might cause logs export issues
 			}) as unknown as LogRecordExporter;
 			log("DEBUG: Log exporter created successfully");
@@ -186,13 +185,14 @@ async function initializeOpenTelemetryInternal() {
 				"DEBUG: Creating OTLP metric exporter with endpoint:",
 				config.openTelemetry.metricsEndpoint,
 			);
-			const { OTLPMetricExporter } = await import(
-				"@opentelemetry/exporter-metrics-otlp-http"
-			);
+			const {
+				OTLPMetricExporter,
+				CompressionAlgorithm: MetricCompressionAlgorithm,
+			} = await import("@opentelemetry/exporter-metrics-otlp-grpc");
 			const metricExporter = new OTLPMetricExporter({
 				url: config.openTelemetry.metricsEndpoint,
-				headers: { "Content-Type": "application/json" },
 				timeoutMillis: exporterTimeout,
+				compression: MetricCompressionAlgorithm.GZIP,
 				...commonConfig,
 			}) as unknown as PushMetricExporter;
 			log("DEBUG: OTLP metric exporter created successfully");
@@ -252,9 +252,11 @@ async function initializeOpenTelemetryInternal() {
 				resource: resource,
 				traceExporter,
 				spanProcessors: [batchSpanProcessor],
-				logRecordProcessors: [new BatchLogRecordProcessor(logExporter, {
-					exportTimeoutMillis: exporterTimeout,
-				})],
+				logRecordProcessors: [
+					new BatchLogRecordProcessor(logExporter, {
+						exportTimeoutMillis: exporterTimeout,
+					}),
+				],
 				instrumentations: [
 					getNodeAutoInstrumentations({
 						"@opentelemetry/instrumentation-aws-lambda": { enabled: false },
@@ -459,4 +461,3 @@ export function recordKafkaMessage(topic: string, messageSize: number) {
 		}
 	}
 }
-
