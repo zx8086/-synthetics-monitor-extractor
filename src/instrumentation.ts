@@ -125,13 +125,13 @@ async function initializeOpenTelemetryInternal() {
 				"DEBUG: Creating trace exporter with endpoint:",
 				config.openTelemetry.tracesEndpoint,
 			);
-			const { OTLPTraceExporter, CompressionAlgorithm } = await import(
-				"@opentelemetry/exporter-trace-otlp-grpc"
+			const { OTLPTraceExporter } = await import(
+				"@opentelemetry/exporter-trace-otlp-proto"
 			);
 			const traceExporter = new OTLPTraceExporter({
 				url: config.openTelemetry.tracesEndpoint,
 				timeoutMillis: exporterTimeout,
-				compression: CompressionAlgorithm.GZIP,
+				headers: { "Content-Type": "application/x-protobuf" },
 				...commonConfig,
 			}) as unknown as SpanExporter;
 			log("DEBUG: Trace exporter created successfully");
@@ -144,12 +144,13 @@ async function initializeOpenTelemetryInternal() {
 				"DEBUG: Creating log exporter with endpoint:",
 				config.openTelemetry.logsEndpoint,
 			);
-			const { OTLPLogExporter, CompressionAlgorithm: LogCompressionAlgorithm } =
-				await import("@opentelemetry/exporter-logs-otlp-grpc");
+			const { OTLPLogExporter } = await import(
+				"@opentelemetry/exporter-logs-otlp-proto"
+			);
 			const logExporter = new OTLPLogExporter({
 				url: config.openTelemetry.logsEndpoint,
 				timeoutMillis: exporterTimeout,
-				compression: LogCompressionAlgorithm.GZIP,
+				headers: { "Content-Type": "application/x-protobuf" },
 				// Remove commonConfig that might cause logs export issues
 			}) as unknown as LogRecordExporter;
 			log("DEBUG: Log exporter created successfully");
@@ -185,14 +186,13 @@ async function initializeOpenTelemetryInternal() {
 				"DEBUG: Creating OTLP metric exporter with endpoint:",
 				config.openTelemetry.metricsEndpoint,
 			);
-			const {
-				OTLPMetricExporter,
-				CompressionAlgorithm: MetricCompressionAlgorithm,
-			} = await import("@opentelemetry/exporter-metrics-otlp-grpc");
+			const { OTLPMetricExporter } = await import(
+				"@opentelemetry/exporter-metrics-otlp-proto"
+			);
 			const metricExporter = new OTLPMetricExporter({
 				url: config.openTelemetry.metricsEndpoint,
 				timeoutMillis: exporterTimeout,
-				compression: MetricCompressionAlgorithm.GZIP,
+				headers: { "Content-Type": "application/x-protobuf" },
 				...commonConfig,
 			}) as unknown as PushMetricExporter;
 			log("DEBUG: OTLP metric exporter created successfully");
