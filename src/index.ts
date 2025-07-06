@@ -2,50 +2,52 @@
 
 // Initialize OpenTelemetry FIRST before any other imports
 console.log("Starting application - initializing OpenTelemetry");
+
 import { initializeOpenTelemetry } from "./instrumentation.js";
+
 const otelSdk = initializeOpenTelemetry();
 console.log("OpenTelemetry initialized");
 
-import { Client, estypes } from "@elastic/elasticsearch";
+import { Client, type estypes } from "@elastic/elasticsearch";
 import { HttpConnection } from "@elastic/transport";
-import type { MonitorInfo, SourceDocument, ElasticsearchHit } from "./types";
+import { startApiServer } from "./api.js"; // Using the updated API server with OpenTelemetry logging
+import { config } from "./config.js";
+import { closeDatabase, initializeDatabase } from "./database.js";
+import {
+	checkElasticsearchHealth,
+	closeElasticsearchClient,
+	executeSearch,
+	getElasticsearchClient,
+} from "./elasticsearch.js";
+import {
+	checkKafkaConnection,
+	closeKafkaProducer,
+	getKafkaProducer,
+	sendMonitorDataToKafka,
+} from "./kafka.js";
+import {
+	initializeMetrics,
+	kafkaMessageSizeHistogram,
+	registry,
+	startMetricsServer,
+} from "./metrics.js";
+import type { ElasticsearchHit, MonitorInfo, SourceDocument } from "./types";
+import type { InvalidRecord } from "./types.js";
 import {
 	type BusinessContext,
+	ElasticsearchSourceSchema,
 	type SearchResponse,
 	validateElasticsearchHits,
 	validateMonitorInfo,
-	ElasticsearchSourceSchema,
 	writeInvalidRecords,
 } from "./types.js";
-import type { InvalidRecord } from "./types.js";
-import { config } from "./config.js";
-import { validateConnections } from "./validation.js";
-import {
-	initializeMetrics,
-	startMetricsServer,
-	registry,
-	kafkaMessageSizeHistogram,
-} from "./metrics.js";
-import { initializeDatabase, closeDatabase } from "./database.js";
-import { startApiServer } from "./api.js"; // Using the updated API server with OpenTelemetry logging
-import {
-	getElasticsearchClient,
-	executeSearch,
-	closeElasticsearchClient,
-	checkElasticsearchHealth,
-} from "./elasticsearch.js";
-import {
-	getKafkaProducer,
-	sendMonitorDataToKafka,
-	checkKafkaConnection,
-	closeKafkaProducer,
-} from "./kafka.js";
-import { log, err, warn, debug } from "./utils/logger.js";
+import { ConfigManager } from "./utils/configManager.js";
+import { debug, err, log, warn } from "./utils/logger.js";
 import {
 	ParallelProcessor,
 	StreamingProcessor,
 } from "./utils/parallelProcessor.js";
-import { ConfigManager } from "./utils/configManager.js";
+import { validateConnections } from "./validation.js";
 
 log("Initializing metrics...");
 console.log("Initializing metrics...");

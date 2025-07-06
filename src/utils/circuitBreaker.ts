@@ -1,6 +1,6 @@
 /* src/utils/circuitBreaker.ts */
 
-import { log, warn, err } from "./logger.js";
+import { err, log, warn } from "./logger.js";
 
 export enum CircuitState {
 	CLOSED = "CLOSED",
@@ -271,7 +271,7 @@ export class ExponentialBackoff {
 
 	private calculateDelay(): number {
 		const exponentialDelay = Math.min(
-			this.baseDelay * Math.pow(2, this.attempts),
+			this.baseDelay * 2 ** this.attempts,
 			this.maxDelay,
 		);
 

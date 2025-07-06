@@ -1,39 +1,37 @@
 /* src/instrumentation.ts */
 
-import { trace, context } from "@opentelemetry/api";
-
 import {
-	diag,
+	type Counter,
+	context,
 	DiagConsoleLogger,
 	DiagLogLevel,
-	metrics,
-	type Meter,
-	type Counter,
+	diag,
 	type Histogram,
+	type Meter,
+	metrics,
+	trace,
 } from "@opentelemetry/api";
-import { NodeSDK } from "@opentelemetry/sdk-node";
-import {
-	ATTR_SERVICE_NAME,
-	ATTR_SERVICE_VERSION,
-} from "@opentelemetry/semantic-conventions";
-import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { MonitoredOTLPTraceExporter } from "./otlp/MonitoredOTLPTraceExporter.js";
-import { MonitoredOTLPMetricExporter } from "./otlp/MonitoredOTLPMetricExporter.js";
-import { MonitoredOTLPLogExporter } from "./otlp/MonitoredOTLPLogExporter.js";
-import type { SpanExporter } from "@opentelemetry/sdk-trace-base";
-import type { PushMetricExporter } from "@opentelemetry/sdk-metrics";
+import * as api from "@opentelemetry/api-logs";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
+import { WinstonInstrumentation } from "@opentelemetry/instrumentation-winston";
 import type { LogRecordExporter } from "@opentelemetry/sdk-logs";
+import {
+	BatchLogRecordProcessor,
+	LoggerProvider,
+} from "@opentelemetry/sdk-logs";
+import type { PushMetricExporter } from "@opentelemetry/sdk-metrics";
 import {
 	MeterProvider,
 	PeriodicExportingMetricReader,
 } from "@opentelemetry/sdk-metrics";
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import type { SpanExporter } from "@opentelemetry/sdk-trace-base";
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import {
-	LoggerProvider,
-	BatchLogRecordProcessor,
-} from "@opentelemetry/sdk-logs";
-import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
-import { WinstonInstrumentation } from "@opentelemetry/instrumentation-winston";
-import * as api from "@opentelemetry/api-logs";
+	ATTR_SERVICE_NAME,
+	ATTR_SERVICE_VERSION,
+} from "@opentelemetry/semantic-conventions";
 import { config } from "./config.js";
 
 const INSTRUMENTATION_ENABLED = config.openTelemetry.enabled;
@@ -42,7 +40,10 @@ let sdk: NodeSDK | undefined;
 let meter: Meter | undefined;
 let httpRequestCounter: Counter | undefined;
 let httpResponseTimeHistogram: Histogram | undefined;
+let kafkaMessageCounter: Counter | undefined;
+let kafkaMessageSizeHistogram: Histogram | undefined;
 let isInitialized = false;
+let prometheusExporter: any;
 
 const createResource = async () => {
 	const { defaultResource, resourceFromAttributes } = await import(
@@ -57,19 +58,19 @@ const createResource = async () => {
 	);
 };
 
-const exporterTimeout = 10000;
+const exporterTimeout = 15000; // Increased timeout for network reliability
 
 const commonConfig = {
 	timeoutMillis: exporterTimeout,
-	concurrencyLimit: 100,
-	keepAlive: true,
+	concurrencyLimit: 1, // Single request to avoid overwhelming endpoint
+	keepAlive: false, // Fresh connections to avoid stale connection timeouts
 };
 
 export function initializeHttpMetrics() {
 	const { log, err } = require("./utils/logger.js");
 
 	if (INSTRUMENTATION_ENABLED && meter) {
-		log("Initializing HTTP metrics");
+		log("Initializing HTTP and Kafka metrics");
 		try {
 			httpRequestCounter = meter.createCounter("http_requests_total", {
 				description: "Count of HTTP requests",
@@ -84,13 +85,28 @@ export function initializeHttpMetrics() {
 			);
 			log("HTTP response time histogram created");
 
-			log("HTTP metrics initialized successfully");
+			// Initialize Kafka metrics
+			kafkaMessageCounter = meter.createCounter("kafka_messages_sent_total", {
+				description: "Total number of messages sent to Kafka",
+			});
+			log("Kafka message counter created");
+
+			kafkaMessageSizeHistogram = meter.createHistogram(
+				"kafka_message_size_bytes",
+				{
+					description: "Size of Kafka messages in bytes",
+					unit: "bytes",
+				},
+			);
+			log("Kafka message size histogram created");
+
+			log("HTTP and Kafka metrics initialized successfully");
 		} catch (error) {
-			err("Error initializing HTTP metrics:", error);
+			err("Error initializing metrics:", error);
 		}
 	} else {
 		log(
-			"HTTP metrics initialization skipped (instrumentation disabled or meter not available)",
+			"Metrics initialization skipped (instrumentation disabled or meter not available)",
 		);
 	}
 }
@@ -109,19 +125,15 @@ async function initializeOpenTelemetryInternal() {
 				"DEBUG: Creating trace exporter with endpoint:",
 				config.openTelemetry.tracesEndpoint,
 			);
-			log(
-				"DEBUG: Trace exporter timeout configuration:",
-				exporterTimeout,
-				"ms",
+			const { OTLPTraceExporter } = await import(
+				"@opentelemetry/exporter-trace-otlp-http"
 			);
-			const traceExporter = new MonitoredOTLPTraceExporter(
-				{
-					url: config.openTelemetry.tracesEndpoint,
-					headers: { "Content-Type": "application/json" },
-					...commonConfig,
-				},
-				exporterTimeout,
-			) as unknown as SpanExporter;
+			const traceExporter = new OTLPTraceExporter({
+				url: config.openTelemetry.tracesEndpoint,
+				headers: { "Content-Type": "application/json" },
+				timeoutMillis: exporterTimeout,
+				...commonConfig,
+			}) as unknown as SpanExporter;
 			log("DEBUG: Trace exporter created successfully");
 
 			log(
@@ -132,15 +144,15 @@ async function initializeOpenTelemetryInternal() {
 				"DEBUG: Creating log exporter with endpoint:",
 				config.openTelemetry.logsEndpoint,
 			);
-			log("DEBUG: Log exporter timeout configuration:", exporterTimeout, "ms");
-			const logExporter = new MonitoredOTLPLogExporter(
-				{
-					url: config.openTelemetry.logsEndpoint,
-					headers: { "Content-Type": "application/json" },
-					...commonConfig,
-				},
-				exporterTimeout,
-			) as unknown as LogRecordExporter;
+			const { OTLPLogExporter } = await import(
+				"@opentelemetry/exporter-logs-otlp-http"
+			);
+			const logExporter = new OTLPLogExporter({
+				url: config.openTelemetry.logsEndpoint,
+				headers: { "Content-Type": "application/json" },
+				timeoutMillis: exporterTimeout,
+				// Remove commonConfig that might cause logs export issues
+			}) as unknown as LogRecordExporter;
 			log("DEBUG: Log exporter created successfully");
 
 			log("All OTLP exporters created with 10s timeout configuration");
@@ -152,9 +164,7 @@ async function initializeOpenTelemetryInternal() {
 			loggerProvider.addLogRecordProcessor(
 				new BatchLogRecordProcessor(logExporter, {
 					exportTimeoutMillis: exporterTimeout,
-					maxExportBatchSize: 512,
-					maxQueueSize: 2048,
-					scheduledDelayMillis: 5000,
+					// Use default batch sizes for optimal performance
 				}),
 			);
 			log(
@@ -173,17 +183,40 @@ async function initializeOpenTelemetryInternal() {
 			);
 
 			log(
-				"OTLP metrics export disabled to avoid conflict with existing Prometheus metrics system",
+				"DEBUG: Creating OTLP metric exporter with endpoint:",
+				config.openTelemetry.metricsEndpoint,
 			);
-			log("Traces and logs will continue to be exported to OTLP endpoints");
-			const otlpMetricReader = null;
+			const { OTLPMetricExporter } = await import(
+				"@opentelemetry/exporter-metrics-otlp-http"
+			);
+			const metricExporter = new OTLPMetricExporter({
+				url: config.openTelemetry.metricsEndpoint,
+				headers: { "Content-Type": "application/json" },
+				timeoutMillis: exporterTimeout,
+				...commonConfig,
+			}) as unknown as PushMetricExporter;
+			log("DEBUG: OTLP metric exporter created successfully");
+
+			const periodicExportingMetricReader = new PeriodicExportingMetricReader({
+				exporter: metricExporter,
+				exportIntervalMillis: config.openTelemetry.metricReaderInterval,
+				exportTimeoutMillis: exporterTimeout,
+			});
 
 			log(
-				"Creating MeterProvider without OTLP metrics reader (using existing Prometheus metrics)",
+				"Creating Prometheus metric reader for OpenTelemetry metrics integration",
+			);
+			prometheusExporter = new PrometheusExporter({
+				preventServerStart: true, // Don't start a separate HTTP server
+				endpoint: "/otel-metrics", // Different endpoint to avoid conflicts
+			});
+
+			log(
+				"Creating MeterProvider with both OTLP and Prometheus metric readers",
 			);
 			const meterProvider = new MeterProvider({
 				resource: resource,
-				readers: [], // No OTLP metric readers - using existing Prometheus metrics
+				readers: [periodicExportingMetricReader, prometheusExporter], // Both OTLP push and Prometheus scraping
 			});
 			log("MeterProvider created successfully");
 
@@ -207,9 +240,7 @@ async function initializeOpenTelemetryInternal() {
 			log("DEBUG: Registering trace provider with exporter");
 			const batchSpanProcessor = new BatchSpanProcessor(traceExporter, {
 				exportTimeoutMillis: exporterTimeout,
-				maxExportBatchSize: 512,
-				maxQueueSize: 2048,
-				scheduledDelayMillis: 5000,
+				// Use default batch sizes for optimal performance
 			});
 			log(
 				"DEBUG: Trace provider registered successfully with BatchSpanProcessor timeout:",
@@ -221,7 +252,9 @@ async function initializeOpenTelemetryInternal() {
 				resource: resource,
 				traceExporter,
 				spanProcessors: [batchSpanProcessor],
-				logRecordProcessors: [new BatchLogRecordProcessor(logExporter)],
+				logRecordProcessors: [new BatchLogRecordProcessor(logExporter, {
+					exportTimeoutMillis: exporterTimeout,
+				})],
 				instrumentations: [
 					getNodeAutoInstrumentations({
 						"@opentelemetry/instrumentation-aws-lambda": { enabled: false },
@@ -312,6 +345,65 @@ export function getMeter(): Meter | undefined {
 	return meter;
 }
 
+export function getPrometheusExporter(): any {
+	return prometheusExporter;
+}
+
+export async function getOpenTelemetryMetrics(): Promise<string> {
+	const { log, err } = require("./utils/logger.js");
+
+	if (!prometheusExporter) {
+		log("PrometheusExporter not initialized");
+		return "";
+	}
+
+	try {
+		// Force collection of current metrics
+		await prometheusExporter.forceFlush();
+		log("PrometheusExporter forceFlush completed");
+
+		// The PrometheusExporter should have a server
+		if (
+			prometheusExporter._server &&
+			prometheusExporter._server.getMetricsRequestHandler
+		) {
+			log("Using server's getMetricsRequestHandler");
+			const handler = prometheusExporter._server.getMetricsRequestHandler();
+
+			return new Promise((resolve) => {
+				const chunks: string[] = [];
+				const mockResponse = {
+					setHeader: () => {},
+					write: (chunk: string) => chunks.push(chunk),
+					end: (chunk?: string) => {
+						if (chunk) chunks.push(chunk);
+						const result = chunks.join("");
+						log("OpenTelemetry metrics retrieved, length:", result.length);
+						resolve(result);
+					},
+				};
+
+				handler({}, mockResponse);
+			});
+		} else {
+			log("PrometheusExporter server or handler not available");
+			log("Available methods:", Object.getOwnPropertyNames(prometheusExporter));
+
+			// Try to access the underlying registry
+			if (prometheusExporter._registry) {
+				log("Using PrometheusExporter internal registry");
+				const metrics = await prometheusExporter._registry.metrics();
+				return metrics;
+			}
+
+			return "";
+		}
+	} catch (error) {
+		err("Error getting OpenTelemetry metrics:", error);
+		return "";
+	}
+}
+
 export function recordHttpRequest(method: string, route: string) {
 	const { debug, warn, err } = require("./utils/logger.js");
 
@@ -347,3 +439,24 @@ export function recordHttpResponseTime(
 		httpResponseTimeHistogram.record(duration / 1000, attributes);
 	}
 }
+
+export function recordKafkaMessage(topic: string, messageSize: number) {
+	const { debug, err } = require("./utils/logger.js");
+
+	if (INSTRUMENTATION_ENABLED && isInitialized) {
+		if (kafkaMessageCounter) {
+			kafkaMessageCounter.add(1, { topic });
+			debug(`Recorded Kafka message: topic=${topic}`);
+		} else {
+			err("Kafka message counter not initialized");
+		}
+
+		if (kafkaMessageSizeHistogram) {
+			kafkaMessageSizeHistogram.record(messageSize, { topic });
+			debug(`Recorded Kafka message size: topic=${topic}, size=${messageSize}`);
+		} else {
+			err("Kafka message size histogram not initialized");
+		}
+	}
+}
+

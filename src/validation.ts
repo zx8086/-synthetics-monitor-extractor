@@ -3,7 +3,7 @@
 import { Client, HttpConnection } from "@elastic/elasticsearch";
 import { Admin } from "@platformatic/kafka";
 import { config } from "./config.js";
-import { log, err } from "./utils/logger.js";
+import { err, log } from "./utils/logger.js";
 
 interface ValidationResult {
 	valid: boolean;

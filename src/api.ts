@@ -1,10 +1,9 @@
 /* src/api.ts */
 
-import type { Server } from "bun";
 import { join } from "node:path";
-import { trace, context, SpanStatusCode, SpanKind } from "@opentelemetry/api";
+import { context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
+import type { Server } from "bun";
 import { config } from "./config.js";
-import { registry } from "./metrics.js";
 import {
 	deleteInvalidRecord,
 	getAllInvalidRecords,
@@ -13,10 +12,13 @@ import {
 	getInvalidRecordsSummary,
 } from "./database.js";
 import {
+	getMeter,
+	getOpenTelemetryMetrics,
 	recordHttpRequest,
 	recordHttpResponseTime,
 } from "./instrumentation.js";
-import { log, err } from "./utils/logger.js";
+import { registry } from "./metrics.js";
+import { err, log } from "./utils/logger.js";
 
 // Create a tracer for the API server
 const tracer = trace.getTracer("api-server", "1.0.0");
@@ -384,11 +386,21 @@ export function startApiServer(port: number = config.metrics.port): Server {
 					return response;
 				}
 
-				// Prometheus metrics endpoint
+				// Prometheus metrics endpoint (includes OpenTelemetry metrics)
 				if (url.pathname === config.metrics.endpoint) {
 					try {
-						const metrics = await registry.metrics();
-						const response = new Response(metrics, {
+						// Get prom-client metrics
+						const promMetrics = await registry.metrics();
+
+						// Get OpenTelemetry metrics
+						const otelMetrics = await getOpenTelemetryMetrics();
+
+						// Combine metrics
+						const combinedMetrics = otelMetrics
+							? `${promMetrics}\n# OpenTelemetry metrics\n${otelMetrics}`
+							: promMetrics;
+
+						const response = new Response(combinedMetrics, {
 							headers: { "Content-Type": registry.contentType },
 						});
 						recordHttpResponseTime(performance.now() - startTime, route, 200);
@@ -397,7 +409,7 @@ export function startApiServer(port: number = config.metrics.port): Server {
 						if (span) {
 							span.setAttributes({
 								"http.status_code": 200,
-								"http.response_content_length": metrics.length,
+								"http.response_content_length": combinedMetrics.length,
 								"http.response_content_type": registry.contentType,
 							});
 						}

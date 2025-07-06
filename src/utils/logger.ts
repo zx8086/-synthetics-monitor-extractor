@@ -1,8 +1,8 @@
 /* src/utils/logger.ts */
 
-import winston from "winston";
 import { ecsFormat } from "@elastic/ecs-winston-format";
-import { trace, context, type SpanContext } from "@opentelemetry/api";
+import { context, type SpanContext, trace } from "@opentelemetry/api";
+import winston from "winston";
 import TransportStream from "winston-transport";
 
 // Do NOT import config at the top to avoid circular dependency
@@ -166,7 +166,8 @@ function getLogger(): winston.Logger {
 
 	// Add console transport if enabled
 	if (config?.logging?.console?.enabled !== false) {
-		const consoleLevel = config?.logging?.console?.level || config?.logging?.level || "info";
+		const consoleLevel =
+			config?.logging?.console?.level || config?.logging?.level || "info";
 		transports.push(
 			new winston.transports.Console({
 				level: consoleLevel,
@@ -184,7 +185,10 @@ function getLogger(): winston.Logger {
 	// Add OpenTelemetry transport if global OpenTelemetry is enabled
 	if (config?.openTelemetry?.enabled) {
 		try {
-			const otelLevel = config?.logging?.opentelemetry?.level || config?.logging?.level || "info";
+			const otelLevel =
+				config?.logging?.opentelemetry?.level ||
+				config?.logging?.level ||
+				"info";
 			const otelTransport = new OpenTelemetryHttpTransport({
 				level: otelLevel,
 			});

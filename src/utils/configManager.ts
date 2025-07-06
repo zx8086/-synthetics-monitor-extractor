@@ -4,7 +4,7 @@ import { watch } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { log, warn, err } from "./logger.js";
+import { err, log, warn } from "./logger.js";
 
 // Define which configuration sections can be hot-reloaded
 interface HotReloadableConfig {
@@ -113,7 +113,7 @@ export class ConfigManager {
 			const { dirname } = await import("node:path");
 			const { mkdir, access } = await import("node:fs/promises");
 			const configDir = dirname(this.configFilePath);
-			
+
 			try {
 				await access(configDir);
 			} catch {
@@ -197,11 +197,11 @@ export class ConfigManager {
 			});
 		} catch (error) {
 			// Check if it's just a file not found error (which is expected)
-			if (error instanceof Error && error.message.includes('ENOENT')) {
+			if (error instanceof Error && error.message.includes("ENOENT")) {
 				// Don't log as error for file not found - this is expected
 				throw error;
 			}
-			
+
 			err("Failed to load configuration from file", {
 				config_load_error: {
 					file: this.configFilePath,

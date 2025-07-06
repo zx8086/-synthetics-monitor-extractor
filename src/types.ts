@@ -774,7 +774,6 @@ export async function writeInvalidRecords(
 	}
 }
 
-
 // Validation functions
 export async function validateElasticsearchHits(
 	data: unknown[],
@@ -833,7 +832,6 @@ export async function validateMonitorInfo(
 		} catch (error) {
 			warn(`Skipping invalid monitor info (validation_error: ${error})`);
 			errors.push(error);
-			continue;
 		}
 	}
 

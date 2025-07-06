@@ -1,9 +1,9 @@
 /* src/database.ts */
 
 import { Database } from "bun:sqlite";
-import { join } from "path";
 import { existsSync, mkdirSync } from "fs";
-import { log, err } from "./utils/logger.js";
+import { join } from "path";
+import { err, log } from "./utils/logger.js";
 
 // Ensure the data directory exists
 const DATA_DIR = join(import.meta.dir, "..", "data");

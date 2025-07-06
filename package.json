@@ -39,6 +39,7 @@
     "@opentelemetry/auto-instrumentations-node": "^0.60.1",
     "@opentelemetry/exporter-logs-otlp-http": "^0.202.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.202.0",
+    "@opentelemetry/exporter-prometheus": "^0.202.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.202.0",
     "@opentelemetry/instrumentation-http": "^0.202.0",
     "@opentelemetry/instrumentation-winston": "^0.47.0",
@@ -57,7 +58,8 @@
     "zod": "^3.25.74"
   },
   "trustedDependencies": [
-    "core-js"
+    "core-js",
+    "protobufjs"
   ],
   "overrides": {
     "lodash": "^4.17.21",

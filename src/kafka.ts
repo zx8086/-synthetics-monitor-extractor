@@ -1,18 +1,19 @@
 /* src/kafka.ts */
 
 import {
-	Producer,
 	Admin,
-	stringSerializers,
 	ProduceAcks,
+	Producer,
+	stringSerializers,
 } from "@platformatic/kafka";
+import { z } from "zod";
 import { config } from "./config.js";
+import { recordKafkaMessage } from "./instrumentation.js";
 import { kafkaMessageSizeHistogram } from "./metrics.js";
 import type { MonitorInfo } from "./types.js";
 import { writeInvalidRecords } from "./types.js";
-import { z } from "zod";
-import { log, err } from "./utils/logger.js";
 import { CircuitBreaker, ExponentialBackoff } from "./utils/circuitBreaker.js";
+import { err, log } from "./utils/logger.js";
 
 // Define Zod schemas for Kafka messages
 const KafkaHeaderSchema = z.record(z.string());
@@ -201,13 +202,18 @@ export async function sendMonitorDataToKafka(
 					const uniqueKey = sanitizeKey(rawKey);
 
 					// Track message size metrics
+					const messageSize = Buffer.byteLength(JSON.stringify(item));
+
+					// Record in both prom-client (for backward compatibility) and OpenTelemetry
 					if (kafkaMessageSizeHistogram) {
-						const messageSize = Buffer.byteLength(JSON.stringify(item));
 						kafkaMessageSizeHistogram.observe(
 							{ topic: topicName },
 							messageSize,
 						);
 					}
+
+					// Record in OpenTelemetry metrics
+					recordKafkaMessage(topicName, messageSize);
 
 					// Create headers as a plain object instead of a Map
 					const headers = createMessageHeaders(item);
@@ -445,4 +451,3 @@ export async function closeKafkaProducer(): Promise<void> {
 		producerInstance = null;
 	}
 }
-

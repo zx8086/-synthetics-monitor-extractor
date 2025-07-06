@@ -1,11 +1,11 @@
 /* src/elasticsearch.ts */
 
-import { Client, estypes } from "@elastic/elasticsearch";
+import { Client, type estypes } from "@elastic/elasticsearch";
 import { HttpConnection } from "@elastic/transport";
-import { config } from "./config.js";
 import { Agent as HttpAgent } from "http";
 import { Agent as HttpsAgent } from "https";
-import { log, err, warn } from "./utils/logger.js";
+import { config } from "./config.js";
+import { err, log, warn } from "./utils/logger.js";
 
 // Configure global agent defaults for keep-alive
 const httpAgent = new HttpAgent({
