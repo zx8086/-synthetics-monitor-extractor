@@ -8,7 +8,7 @@ import {
 } from "@platformatic/kafka";
 import { z } from "zod";
 import { config } from "./config.js";
-import { recordKafkaMessage } from "./instrumentation.js";
+import { recordKafkaMessage } from "./instrumentation-nodesdk.js";
 import { kafkaMessageSizeHistogram } from "./metrics.js";
 import type { MonitorInfo } from "./types.js";
 import { writeInvalidRecords } from "./types.js";

@@ -3,7 +3,7 @@
 // Initialize OpenTelemetry FIRST before any other imports
 console.log("Starting application - initializing OpenTelemetry");
 
-import { initializeOpenTelemetry } from "./instrumentation.js";
+import { initializeOpenTelemetry } from "./instrumentation-nodesdk.js";
 
 const otelSdk = initializeOpenTelemetry();
 console.log("OpenTelemetry initialized");

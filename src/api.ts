@@ -16,7 +16,7 @@ import {
 	getOpenTelemetryMetrics,
 	recordHttpRequest,
 	recordHttpResponseTime,
-} from "./instrumentation.js";
+} from "./instrumentation-nodesdk.js";
 import { registry } from "./metrics.js";
 import { err, log } from "./utils/logger.js";
 
