@@ -47,7 +47,10 @@ import {
 	ParallelProcessor,
 	StreamingProcessor,
 } from "./utils/parallelProcessor.js";
-import { validateConnections } from "./validation.js";
+import {
+	validateConnectionsOrExit,
+	formatValidationSummary,
+} from "./utils/connectionValidator.js";
 
 log("Initializing metrics...");
 console.log("Initializing metrics...");
@@ -628,30 +631,10 @@ async function startExtractionProcess() {
 		log("API server started successfully");
 		console.log("API server started successfully");
 
-		// Initial connection validation
-		log("Validating connections to Elasticsearch and Kafka");
-		console.log("Validating connections to Elasticsearch and Kafka");
-		const connectionValidation = await validateConnections();
-
-		if (!connectionValidation.valid) {
-			err(
-				"❌ Connection validation failed:",
-				connectionValidation.errors.join(", "),
-			);
-			log(
-				"⚠️ Continuing with interval setup - connections will be retried during extraction cycles",
-			);
-		}
-
-		if (
-			connectionValidation.warnings &&
-			connectionValidation.warnings.length > 0
-		) {
-			log(
-				"✅ Connections validated:",
-				connectionValidation.warnings.join(", "),
-			);
-		}
+		// Validate all external service connections
+		log("Validating connections to all external services...");
+		console.log("Validating connections to all external services...");
+		await validateConnectionsOrExit();
 
 		// Initial run
 		log("Running initial data extraction...");

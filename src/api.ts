@@ -19,6 +19,10 @@ import {
 } from "./instrumentation-nodesdk.js";
 import { registry } from "./metrics.js";
 import { err, log } from "./utils/logger.js";
+import {
+	validateConnections,
+	formatValidationSummary,
+} from "./utils/connectionValidator.js";
 
 // Create a tracer for the API server
 const tracer = trace.getTracer("api-server", "1.0.0");
@@ -604,12 +608,35 @@ export function startApiServer(port: number = config.metrics.port): Server {
 							});
 						}
 						return response;
+					} else if (url.pathname === "/api/validate-connections") {
+						// Validate all external service connections
+						const summary = await validateConnections();
+
+						const response = Response.json(
+							{
+								...summary,
+								formattedSummary: formatValidationSummary(summary),
+							},
+							{ headers },
+						);
+						recordHttpResponseTime(performance.now() - startTime, route, 200);
+						const span = trace.getActiveSpan();
+						if (span) {
+							span.setAttributes({
+								"http.status_code": 200,
+								"api.endpoint_type": "validate_connections",
+								"api.all_connected": summary.allConnected,
+								"api.services_checked": summary.results.length,
+							});
+						}
+						return response;
 					} else if (url.pathname === "/" || url.pathname === "/api") {
 						const response = Response.json(
 							{
 								message: "Synthetic Monitors API",
 								endpoints: [
 									"/health",
+									"/api/validate-connections",
 									config.api.invalidRecordsEndpoint,
 									`${config.api.invalidRecordsEndpoint}?type=monitor_transformation`,
 									`${config.api.invalidRecordsEndpoint}?monitor=monitor_name`,

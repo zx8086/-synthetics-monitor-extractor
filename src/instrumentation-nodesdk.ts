@@ -101,12 +101,16 @@ export function initializeHttpMetrics() {
 function suppressExporterErrors(exporter: any, exporterType: string) {
 	// Override the export method to catch and suppress timeout errors
 	const originalExport = exporter.export;
-	exporter.export = function(...args: any[]) {
+	exporter.export = function (...args: any[]) {
 		const callback = args[args.length - 1];
-		if (typeof callback === 'function') {
+		if (typeof callback === "function") {
 			// Replace the callback to suppress timeout errors
 			const wrappedCallback = (error: any) => {
-				if (error && error.message && error.message.includes('Request timed out')) {
+				if (
+					error &&
+					error.message &&
+					error.message.includes("Request timed out")
+				) {
 					// Silently ignore timeout errors - data was likely sent successfully
 					callback(null);
 				} else {
@@ -135,7 +139,7 @@ async function createOTLPExporters() {
 			keepAlive: true,
 			concurrencyLimit: 1,
 		}),
-		"trace"
+		"trace",
 	);
 	log("DEBUG: Trace exporter created successfully");
 
@@ -151,7 +155,7 @@ async function createOTLPExporters() {
 			keepAlive: true,
 			concurrencyLimit: 1,
 		}),
-		"metrics"
+		"metrics",
 	);
 	log("DEBUG: Metric exporter created successfully");
 
@@ -167,7 +171,7 @@ async function createOTLPExporters() {
 			keepAlive: true,
 			concurrencyLimit: 1,
 		}),
-		"logs"
+		"logs",
 	);
 	log("DEBUG: Log exporter created successfully");
 
@@ -252,7 +256,7 @@ async function initializeOpenTelemetryInternal() {
 
 			// Setup metrics provider after SDK initialization
 			await setupMetricsProvider(metricExporter);
-			
+
 			// Ensure meter is available after metrics setup
 			meter = metrics.getMeter(
 				config.openTelemetry.serviceName,
@@ -339,7 +343,7 @@ export function getPrometheusExporter(): any {
 
 export async function getOpenTelemetryMetrics(): Promise<string> {
 	const { log } = require("./utils/logger.js");
-	
+
 	// Custom metrics are now sent via OTLP, not exposed for scraping
 	// Return empty string since metrics are exported to OTLP endpoint
 	log("Custom metrics are exported via OTLP, not available for scraping");

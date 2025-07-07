@@ -20,7 +20,9 @@
     "security:check": "bash scripts/security-check.sh",
     "lint": "biome check ./src",
     "format": "biome format --write ./src",
-    "health": "curl -f http://localhost:9090/metrics || exit 1"
+    "health": "curl -f http://localhost:9090/metrics || exit 1",
+    "validate": "bun run src/scripts/validate-connections.ts",
+    "test:connections": "bun run src/scripts/validate-connections.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.6",
