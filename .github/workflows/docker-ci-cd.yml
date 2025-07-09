@@ -32,10 +32,6 @@ jobs:
   build-and-deploy:
     runs-on: self-hosted
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [linux/amd64, linux/arm64]
 
     steps:
       - name: Checkout code
@@ -102,7 +98,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -112,10 +108,12 @@ jobs:
             BUILD_VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
             COMMIT_HASH=${{ github.sha }}
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-amd64
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-arm64
             type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-to: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }},mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-amd64,mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-arm64,mode=max
           sbom: true
           provenance: true
 
@@ -144,14 +142,14 @@ jobs:
           image: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: spdx-json
           output-file: sbom.spdx.json
-          artifact-name: sbom-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          artifact-name: sbom-multi-arch
         continue-on-error: true
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
         if: github.event_name != 'pull_request'
         with:
-          name: anchore-sbom-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}-${{ github.run_id }}
+          name: anchore-sbom-multi-arch-${{ github.run_id }}
           path: sbom.spdx.json
         continue-on-error: true
 
@@ -165,10 +163,11 @@ jobs:
           docker ps -q --filter publish=9090 | xargs -r docker stop || true
           docker rm -f synthetics-monitor-test 2>/dev/null || true
 
-          # Run container (will automatically use correct architecture)
+          # Run container (will automatically use correct architecture from multi-arch manifest)
           # Use the first tag from metadata output (tags are newline-separated)
           IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
-          echo "Using image: ${IMAGE_TAG}"
+          echo "Using multi-arch image: ${IMAGE_TAG}"
+          echo "Runner architecture: ${RUNNER_ARCH}"
           docker run -d \
             --name synthetics-monitor-test \
             -p 9090:9090 \
@@ -281,7 +280,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: comprehensive-sbom-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}-${{ github.run_id }}
+          name: comprehensive-sbom-multi-arch-${{ github.run_id }}
           path: sbom-output/
           retention-days: 90
         continue-on-error: true
@@ -312,7 +311,7 @@ jobs:
           else
             # Method 2: Try docker buildx imagetools inspect
             echo "Trying docker buildx imagetools inspect..."
-            IMAGE_DIGEST=$(docker buildx imagetools inspect "${IMAGE_REF}" --raw 2>/dev/null | jq -r '.manifests[]? | select(.platform.architecture == "${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}") | .digest' 2>/dev/null || echo "")
+            IMAGE_DIGEST=$(docker buildx imagetools inspect "${IMAGE_REF}" --raw 2>/dev/null | jq -r '.manifests[0].digest' 2>/dev/null || echo "")
 
             if [ -z "$IMAGE_DIGEST" ]; then
               # Method 3: Try to get any manifest digest
@@ -375,7 +374,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: attestation-results-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          name: attestation-results-multi-arch
           path: |
             ${{ env.ATTESTATION_RESULTS_DIR }}/*.json
             ${{ env.ATTESTATION_RESULTS_DIR }}/*.md
@@ -393,7 +392,7 @@ jobs:
             echo "|--------|-------|"
             echo "| 🆔 Build ID | \`${GITHUB_SHA::7}\` |"
             echo "| 📦 Image | synthetics-monitor-extractor |"
-            echo "| 🏗️ Platform | ${{ matrix.platform }} |"
+            echo "| 🏗️ Platform | Multi-arch (linux/amd64, linux/arm64) |"
             echo "| ⚡ Status | ${CONTAINER_STATUS:-N/A} |"
 
             # Container Status
