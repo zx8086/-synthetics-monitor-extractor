@@ -561,9 +561,12 @@ export function startApiServer(port: number = config.metrics.port): Server {
 							: "Synthetics";
 
 						// Get the HTML content as text
-						const htmlContent = await Bun.file(
-							join(import.meta.dir, "public", "index.html"),
-						).text();
+						// In production, the public folder is in src/public, not dist/public
+						const publicPath = process.env.NODE_ENV === "production" 
+							? join(process.cwd(), "src", "public", "index.html")
+							: join(import.meta.dir, "public", "index.html");
+						
+						const htmlContent = await Bun.file(publicPath).text();
 
 						// Replace both the title tag and the h1 tag content
 						const modifiedHtml = htmlContent
