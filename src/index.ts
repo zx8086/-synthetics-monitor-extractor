@@ -555,7 +555,7 @@ async function transformMonitorData(
 				if (!errorsByMonitor[error.monitorName]) {
 					errorsByMonitor[error.monitorName] = [];
 				}
-				errorsByMonitor[error.monitorName].push(error.error);
+				errorsByMonitor[error.monitorName]!.push(error.error);
 			}
 
 			// Write grouped errors to database

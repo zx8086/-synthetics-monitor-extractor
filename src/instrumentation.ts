@@ -189,9 +189,9 @@ async function initializeOpenTelemetryInternal() {
 			);
 			const metricExporter = new OTLPMetricExporter({
 				url: config.openTelemetry.metricsEndpoint,
-				timeoutMillis: metricsExporterTimeout,
 				headers: { "Content-Type": "application/json" },
 				...commonConfig,
+				timeoutMillis: metricsExporterTimeout,
 			}) as unknown as PushMetricExporter;
 			log("DEBUG: OTLP metric exporter created successfully");
 
