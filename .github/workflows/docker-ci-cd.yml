@@ -54,18 +54,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Create and use Docker Cloud Builder
-        run: |
-          # Check if cloud-builder already exists
-          if docker buildx ls | grep -q "^cloud-builder "; then
-            echo "Cloud builder already exists, using existing builder"
-            docker buildx use cloud-builder
-          else
-            echo "Creating new cloud builder"
-            docker buildx create --driver cloud zx8086/cldbuild --name cloud-builder --use
-          fi
-          docker buildx ls
-
       - name: Cache Bun dependencies
         uses: actions/cache@v4
         with:
@@ -102,7 +90,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          builder: cloud-builder
           build-args: |
             BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
             BUILD_VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
