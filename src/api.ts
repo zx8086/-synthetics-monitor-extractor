@@ -546,9 +546,25 @@ export function startApiServer(port: number = config.metrics.port): Server {
 						return response;
 					} else if (url.pathname === config.api.uiEndpoint) {
 						// Format the KAFKA_CLIENT_ID for use in the title:
-						// 1. Replace hyphens with spaces
-						// 2. Capitalize each word
+						// Special handling for synthetics-extractor prefix
 						const formatTitlePrefix = (clientId: string) => {
+							// Handle synthetics-extractor prefix specially
+							if (clientId.startsWith("synthetics-extractor")) {
+								// Remove the synthetics-extractor prefix
+								const remaining = clientId.slice("synthetics-extractor".length);
+								
+								// Check if there's anything after synthetics-extractor
+								if (remaining.length === 0) {
+									return "Synthetics Extractor";
+								}
+								
+								// Remove the leading hyphen and uppercase the rest
+								const suffix = remaining.slice(1).toUpperCase();
+								
+								return `Synthetics Extractor ${suffix}`;
+							}
+							
+							// Fallback to original logic for other patterns
 							return clientId
 								.split("-")
 								.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -593,24 +609,49 @@ export function startApiServer(port: number = config.metrics.port): Server {
 						}
 						return response;
 					} else if (url.pathname === "/health") {
-						const response = Response.json(
-							{
-								status: "healthy",
-								timestamp: new Date().toISOString(),
-								service: "synthetics-monitor-extractor",
-								version: process.env.BUILD_VERSION || "unknown",
-							},
-							{ headers },
-						);
-						recordHttpResponseTime(performance.now() - startTime, route, 200);
-						const span = trace.getActiveSpan();
-						if (span) {
-							span.setAttributes({
-								"http.status_code": 200,
-								"api.endpoint_type": "health",
-							});
+						try {
+							const response = Response.json(
+								{
+									status: "OK",
+									timestamp: new Date().toISOString(),
+									service: config.openTelemetry.serviceName,
+									version: config.openTelemetry.serviceVersion || process.env.BUILD_VERSION || "unknown",
+									environment: process.env.NODE_ENV || "development",
+								},
+								{ headers },
+							);
+							recordHttpResponseTime(performance.now() - startTime, route, 200);
+							const span = trace.getActiveSpan();
+							if (span) {
+								span.setAttributes({
+									"http.status_code": 200,
+									"api.endpoint_type": "health",
+								});
+							}
+							return response;
+						} catch (error) {
+							const response = Response.json(
+								{
+									status: "KO",
+									timestamp: new Date().toISOString(),
+									service: config.openTelemetry.serviceName,
+									version: config.openTelemetry.serviceVersion || process.env.BUILD_VERSION || "unknown",
+									environment: process.env.NODE_ENV || "development",
+									error: error instanceof Error ? error.message : "Unknown error",
+								},
+								{ status: 503, headers },
+							);
+							recordHttpResponseTime(performance.now() - startTime, route, 503);
+							const span = trace.getActiveSpan();
+							if (span) {
+								span.setAttributes({
+									"http.status_code": 503,
+									"api.endpoint_type": "health",
+									"error.type": error instanceof Error ? error.constructor.name : "Error",
+								});
+							}
+							return response;
 						}
-						return response;
 					} else if (url.pathname === "/api/validate-connections") {
 						// Validate all external service connections
 						const summary = await validateConnections();

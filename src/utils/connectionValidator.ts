@@ -93,8 +93,6 @@ async function validateKafka(): Promise<ValidationResult> {
 			latency,
 			details: {
 				brokers: config.kafka.brokers,
-				total_topics: result.topics.length,
-				monitoring_topics: result.monitoringTopics,
 				configured_topic: config.kafka.topicName,
 				topic_exists: result.topics.includes(config.kafka.topicName),
 			},
@@ -147,20 +145,22 @@ async function validateOpenTelemetry(): Promise<ValidationResult[]> {
 		try {
 			log(`Validating OpenTelemetry ${endpoint.name} endpoint...`);
 
-			// Extract base URL (remove path) for health check
-			const url = new URL(endpoint.url);
-			const healthUrl = `${url.protocol}//${url.host}/`;
-
-			// Attempt a simple HTTP request to check connectivity
-			const response = await fetch(healthUrl, {
-				method: "GET",
+			// Validate the actual configured endpoint using HTTP/JSON
+			// OTLP HTTP endpoints on port 4318 use JSON format
+			const response = await fetch(endpoint.url, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({}), // Empty JSON body for validation
 				signal: AbortSignal.timeout(5000), // 5 second timeout
 			});
 
 			const latency = Date.now() - startTime;
 
-			// OTLP endpoints typically return 404 or 405 on GET requests to root
-			// This is expected behavior - we're just checking connectivity
+			// OTLP endpoints typically return 400 for empty/invalid payloads
+			// 404/405 for wrong paths, 5xx for server errors
+			// We consider <500 as "connected" since it means the endpoint is reachable
 			const isConnected = response.status < 500;
 
 			results.push({
@@ -169,7 +169,6 @@ async function validateOpenTelemetry(): Promise<ValidationResult[]> {
 				latency,
 				details: {
 					endpoint: endpoint.url,
-					base_url: healthUrl,
 					status_code: response.status,
 					status_text: response.statusText,
 				},

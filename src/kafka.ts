@@ -390,32 +390,35 @@ export async function checkKafkaConnection(): Promise<{
 			const admin = getKafkaAdmin();
 
 			try {
-				// Get metadata for all topics
-				const metadata = await admin.metadata({ topics: [] });
-
-				let topics: string[] = [];
-
-				// Extract topics from metadata
-				if (metadata.topics instanceof Map) {
-					topics = Array.from(metadata.topics.keys());
-				} else if (typeof metadata.topics === "object") {
-					topics = Object.keys(metadata.topics);
+				// Use listTopics() method to get all topics
+				const topics = await admin.listTopics();
+				
+				// Ensure topics is an array
+				const topicList = Array.isArray(topics) ? topics : [];
+				
+				// Check if our configured topic exists
+				const topicExists = topicList.includes(config.kafka.topicName);
+				
+				if (topicExists) {
+					log(`✅ Topic '${config.kafka.topicName}' exists`);
+				} else {
+					warn(`⚠️ Topic '${config.kafka.topicName}' does not exist`);
 				}
 
 				// Filter for monitoring topics
-				const monitoringTopics = topics.filter(
+				const monitoringTopics = topicList.filter(
 					(topic) =>
 						typeof topic === "string" && topic.startsWith("monitoring."),
 				);
 
-				return { topics, monitoringTopics };
+				return { topics: topicList, monitoringTopics };
 			} finally {
 				await admin.close();
 			}
 		});
 
 		log("✅ Successfully connected to Kafka");
-		log(`📋 Available monitoring topics: ${result.monitoringTopics}`);
+		log(`📋 Found ${result.topics.length} topics`);
 
 		return {
 			connected: true,
