@@ -57,15 +57,15 @@ function getLogger(): winston.Logger {
 										logRecords: [
 											{
 												timeUnixNano: Date.now() * 1000000,
-												severityNumber: this.getSeverityNumber(info.level),
-												severityText: info.level.toUpperCase(),
+												severityNumber: this.getSeverityNumber(info.level || info["log.level"] || "info"),
+												severityText: (info.level || info["log.level"] || "info").toUpperCase(),
 												body: {
 													stringValue: info.message,
 												},
 												attributes: [
 													{
 														key: "log.level",
-														value: { stringValue: info.level },
+														value: { stringValue: info.level || info["log.level"] || "info" },
 													},
 													{
 														key: "timestamp",
@@ -136,14 +136,15 @@ function getLogger(): winston.Logger {
 				meta,
 				...rest
 			} = info;
+			// Remove the redundant 'level' and 'log' fields - ECS format already adds log.level
+			const { log, ...restWithoutLog } = rest;
+			
 			// Only flatten meta fields to top-level, do NOT stringify into message
 			let flattened = {
 				"@timestamp": timestamp,
 				"ecs.version": ecsVersion,
-				level,
-				log: { level },
 				message,
-				...rest,
+				...restWithoutLog,
 			};
 			if (meta && typeof meta === "object") {
 				flattened = { ...flattened, ...meta };

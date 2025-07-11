@@ -6,6 +6,7 @@ import {
 	Producer,
 	stringSerializers,
 } from "@platformatic/kafka";
+import { trace } from "@opentelemetry/api";
 import { z } from "zod";
 import { config } from "./config.js";
 import { recordKafkaMessage } from "./instrumentation-nodesdk.js";
@@ -176,22 +177,36 @@ function createMessageHeaders(monitor: MonitorInfo): Map<string, string> {
 	return headers;
 }
 
+// Create tracer for Kafka module
+const tracer = trace.getTracer("kafka-producer", "1.0.0");
+
 /**
  * Send monitor data to Kafka topic
  */
 export async function sendMonitorDataToKafka(
 	monitorData: MonitorInfo[],
 ): Promise<void> {
-	if (!monitorData || monitorData.length === 0) {
-		return;
-	}
+	return tracer.startActiveSpan("sendMonitorDataToKafka", async (span) => {
+		try {
+			if (!monitorData || monitorData.length === 0) {
+				span.setAttributes({
+					"kafka.message_count": 0,
+					"kafka.status": "no_data"
+				});
+				return;
+			}
 
-	const producer = getKafkaProducer();
-	const topicName = config.kafka.topicName;
+			const producer = getKafkaProducer();
+			const topicName = config.kafka.topicName;
+			
+			span.setAttributes({
+				"kafka.topic": topicName,
+				"kafka.message_count": monitorData.length
+			});
 
-	return kafkaCircuitBreaker
-		.execute(async () => {
-			return kafkaBackoff.execute(async () => {
+			return kafkaCircuitBreaker
+				.execute(async () => {
+					return kafkaBackoff.execute(async () => {
 				// Prepare all messages for the single topic
 				const messages: any[] = [];
 
@@ -240,6 +255,11 @@ export async function sendMonitorDataToKafka(
 				});
 
 				log(`Successfully sent ${messages.length} messages to ${topicName}`);
+				
+				span.setAttributes({
+					"kafka.messages_sent": messages.length,
+					"kafka.status": "success"
+				});
 			});
 		})
 		.catch((error: any) => {
@@ -264,8 +284,19 @@ export async function sendMonitorDataToKafka(
 			} else {
 				err(`Kafka send error`, errorInfo);
 			}
+			
+			span.recordException(error);
+			span.setAttributes({
+				"kafka.error": error.message,
+				"kafka.error_code": error.code || "unknown",
+				"kafka.status": "error"
+			});
 			throw error;
 		});
+		} finally {
+			span.end();
+		}
+	});
 }
 
 // Helper function to find differences between objects

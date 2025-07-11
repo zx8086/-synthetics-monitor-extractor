@@ -10,6 +10,7 @@ console.log("OpenTelemetry initialized");
 
 import { Client, type estypes } from "@elastic/elasticsearch";
 import { HttpConnection } from "@elastic/transport";
+import { trace } from "@opentelemetry/api";
 import { startApiServer } from "./api.js"; // Using the updated API server with OpenTelemetry logging
 import { config } from "./config.js";
 import { closeDatabase, initializeDatabase } from "./database.js";
@@ -89,10 +90,14 @@ configManager.onChange("logging", (newConfig, oldConfig) => {
 	});
 });
 
+// Create tracer for the extraction process
+const tracer = trace.getTracer("synthetics-monitor-extractor", "1.0.0");
+
 // Main function to extract and process monitor data
 async function extractAndProcessMonitors() {
-	try {
-		log("Starting synthetic monitor data extraction...");
+	return tracer.startActiveSpan("extractAndProcessMonitors", async (span) => {
+		try {
+			log("Starting synthetic monitor data extraction...");
 
 		// Only check connection if we haven't established one yet
 		const client = getElasticsearchClient();
@@ -131,18 +136,34 @@ async function extractAndProcessMonitors() {
 		await sendMonitorDataToKafka(transformedData);
 
 		log("Monitor extraction completed successfully");
-	} catch (error) {
-		err("Error in extraction process:", error);
-	}
+		
+		// Add attributes to the span
+		span.setAttributes({
+			"extraction.monitor_count": monitorData.length,
+			"extraction.transformed_count": transformedData.length,
+			"extraction.status": "success"
+		});
+		} catch (error) {
+			err("Error in extraction process:", error);
+			span.recordException(error as Error);
+			span.setAttributes({
+				"extraction.status": "error",
+				"extraction.error": (error as Error).message
+			});
+			throw error;
+		} finally {
+			span.end();
+		}
+	});
 }
 
 // Fetch all monitor data from Elasticsearch
 async function fetchAllMonitorData() {
-	const timeRange = config.extraction.timeRange;
-	const size = config.extraction.maxResults;
-	const monitorNameWildcard = config.extraction.monitorNamePattern;
-
-	try {
+	return tracer.startActiveSpan("fetchAllMonitorData", async (span) => {
+		try {
+			const timeRange = config.extraction.timeRange;
+			const size = config.extraction.maxResults;
+			const monitorNameWildcard = config.extraction.monitorNamePattern;
 		// Build the query to get all synthetic monitors
 		const query: estypes.SearchRequest = {
 			index: config.extraction.indexPattern,
@@ -251,23 +272,38 @@ async function fetchAllMonitorData() {
 			dataset_counts: datasetCounts,
 		});
 
-		return validatedHits;
-	} catch (error: any) {
-		err(`Error fetching monitor data`, {
-			elasticsearch_error: error,
+		span.setAttributes({
+			"elasticsearch.hits_count": validatedHits.length,
+			"elasticsearch.query_took_ms": response.took,
+			"elasticsearch.time_range": timeRange,
+			"elasticsearch.index": config.extraction.indexPattern
 		});
-		if (error.meta?.body) {
-			err("Elasticsearch response", {
-				elasticsearch_error_body: error.meta.body,
+		
+		return validatedHits;
+		} catch (error: any) {
+			err(`Error fetching monitor data`, {
+				elasticsearch_error: error,
 			});
-		}
-		if (error.meta?.statusCode) {
-			err("Status code", {
-				elasticsearch_status_code: error.meta.statusCode,
+			if (error.meta?.body) {
+				err("Elasticsearch response", {
+					elasticsearch_error_body: error.meta.body,
+				});
+			}
+			if (error.meta?.statusCode) {
+				err("Status code", {
+					elasticsearch_status_code: error.meta.statusCode,
+				});
+			}
+			span.recordException(error);
+			span.setAttributes({
+				"elasticsearch.error": error.message,
+				"elasticsearch.status_code": error.meta?.statusCode || 0
 			});
+			return [];
+		} finally {
+			span.end();
 		}
-		return [];
-	}
+	});
 }
 
 export function extractBusinessContext(

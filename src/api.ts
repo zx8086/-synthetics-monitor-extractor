@@ -18,7 +18,7 @@ import {
 	recordHttpResponseTime,
 } from "./instrumentation-nodesdk.js";
 import { registry } from "./metrics.js";
-import { err, log } from "./utils/logger.js";
+import { debug, err, log } from "./utils/logger.js";
 import {
 	validateConnections,
 	formatValidationSummary,
@@ -305,7 +305,7 @@ async function executeWithSpan<T>(
 	});
 
 	// Log span creation in debug mode
-	log(`Created span: ${spanName} with ID: ${span.spanContext().spanId}`);
+	debug(`Created span: ${spanName} with ID: ${span.spanContext().spanId}`);
 
 	return context.with(trace.setSpan(context.active(), span), async () => {
 		try {
@@ -323,7 +323,7 @@ async function executeWithSpan<T>(
 			throw error;
 		} finally {
 			// Log span completion
-			log(`Ending span: ${spanName} with ID: ${span.spanContext().spanId}`);
+			debug(`Ending span: ${spanName} with ID: ${span.spanContext().spanId}`);
 			span.end();
 		}
 	});
@@ -337,9 +337,6 @@ export function startApiServer(port: number = config.metrics.port): Server {
 			const url = new URL(req.url);
 			const method = req.method;
 			const route = url.pathname;
-
-			// Record incoming request
-			recordHttpRequest(method, route);
 
 			// Create initial span attributes
 			const spanAttributes = {
@@ -355,6 +352,9 @@ export function startApiServer(port: number = config.metrics.port): Server {
 
 			// Execute the entire request within a span
 			return executeWithSpan(`${method} ${route}`, spanAttributes, async () => {
+				// Record incoming request inside the span context
+				recordHttpRequest(method, route);
+				
 				// Validate request security
 				const validationError = validateRequest(req, startTime);
 				if (validationError) {
@@ -610,25 +610,71 @@ export function startApiServer(port: number = config.metrics.port): Server {
 						return response;
 					} else if (url.pathname === "/health") {
 						try {
-							const response = Response.json(
-								{
-									status: "OK",
-									timestamp: new Date().toISOString(),
-									service: config.openTelemetry.serviceName,
-									version: config.openTelemetry.serviceVersion || process.env.BUILD_VERSION || "unknown",
-									environment: process.env.NODE_ENV || "development",
-								},
-								{ headers },
-							);
-							recordHttpResponseTime(performance.now() - startTime, route, 200);
-							const span = trace.getActiveSpan();
-							if (span) {
-								span.setAttributes({
-									"http.status_code": 200,
-									"api.endpoint_type": "health",
-								});
+							// Validate all external service connections
+							const summary = await validateConnections();
+							
+							const baseResponse = {
+								timestamp: new Date().toISOString(),
+								service: config.openTelemetry.serviceName,
+								version: config.openTelemetry.serviceVersion || process.env.BUILD_VERSION || "unknown",
+								environment: process.env.NODE_ENV || "development",
+							};
+
+							// Extract service status from results
+							const elasticsearch = summary.results.find(r => r.service === "Elasticsearch");
+							const kafka = summary.results.find(r => r.service === "Kafka");
+							const opentelemetry = summary.results.filter(r => r.service.startsWith("OpenTelemetry"));
+
+							if (summary.allConnected) {
+								const response = Response.json(
+									{
+										status: "OK",
+										...baseResponse,
+										checks: {
+											elasticsearch: elasticsearch?.connected ? "OK" : "KO",
+											kafka: kafka?.connected ? "OK" : "KO",
+											opentelemetry: opentelemetry.length > 0 && opentelemetry.every(o => o.connected) ? "OK" : "KO",
+										},
+									},
+									{ headers },
+								);
+								recordHttpResponseTime(performance.now() - startTime, route, 200);
+								const span = trace.getActiveSpan();
+								if (span) {
+									span.setAttributes({
+										"http.status_code": 200,
+										"api.endpoint_type": "health",
+										"health.status": "OK",
+									});
+								}
+								return response;
+							} else {
+								const failedServices = summary.results.filter(r => !r.connected);
+								const response = Response.json(
+									{
+										status: "KO",
+										...baseResponse,
+										checks: {
+											elasticsearch: elasticsearch?.connected ? "OK" : "KO",
+											kafka: kafka?.connected ? "OK" : "KO",
+											opentelemetry: opentelemetry.length > 0 && opentelemetry.every(o => o.connected) ? "OK" : "KO",
+										},
+										errors: failedServices.map(s => s.error).filter(Boolean),
+									},
+									{ status: 503, headers },
+								);
+								recordHttpResponseTime(performance.now() - startTime, route, 503);
+								const span = trace.getActiveSpan();
+								if (span) {
+									span.setAttributes({
+										"http.status_code": 503,
+										"api.endpoint_type": "health",
+										"health.status": "KO",
+										"health.failed_services": failedServices.map(s => s.service.toLowerCase()).join(","),
+									});
+								}
+								return response;
 							}
-							return response;
 						} catch (error) {
 							const response = Response.json(
 								{
@@ -647,6 +693,7 @@ export function startApiServer(port: number = config.metrics.port): Server {
 								span.setAttributes({
 									"http.status_code": 503,
 									"api.endpoint_type": "health",
+									"health.status": "KO",
 									"error.type": error instanceof Error ? error.constructor.name : "Error",
 								});
 							}
