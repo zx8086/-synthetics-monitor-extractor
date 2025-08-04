@@ -44,7 +44,7 @@
     "@opentelemetry/exporter-prometheus": "^0.202.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.202.0",
     "@opentelemetry/instrumentation-http": "^0.202.0",
-    "@opentelemetry/instrumentation-winston": "^0.47.0",
+    "@opentelemetry/instrumentation-winston": "^0.48.0",
     "@opentelemetry/otlp-exporter-base": "^0.202.0",
     "@opentelemetry/resources": "^2.0.1",
     "@opentelemetry/sdk-logs": "^0.202.0",
