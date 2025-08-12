@@ -99,56 +99,56 @@ async function extractAndProcessMonitors() {
 		try {
 			log("Starting synthetic monitor data extraction...");
 
-		// Only check connection if we haven't established one yet
-		const client = getElasticsearchClient();
-		const isHealthy = await checkElasticsearchHealth();
+			// Only check connection if we haven't established one yet
+			const client = getElasticsearchClient();
+			const isHealthy = await checkElasticsearchHealth();
 
-		if (!isHealthy) {
-			err(
-				"❌ Elasticsearch connection failed - skipping this extraction cycle",
-			);
-			return;
-		}
+			if (!isHealthy) {
+				err(
+					"❌ Elasticsearch connection failed - skipping this extraction cycle",
+				);
+				return;
+			}
 
-		// Check Kafka connection and list topics
-		const { connected: isKafkaConnected } = await checkKafkaConnection();
-		if (!isKafkaConnected) {
-			err("❌ Kafka connection failed - skipping this extraction cycle");
-			return;
-		}
+			// Check Kafka connection and list topics
+			const { connected: isKafkaConnected } = await checkKafkaConnection();
+			if (!isKafkaConnected) {
+				err("❌ Kafka connection failed - skipping this extraction cycle");
+				return;
+			}
 
-		log("Connected to Kafka");
+			log("Connected to Kafka");
 
-		// Fetch all synthetic monitor data
-		const monitorData = await fetchAllMonitorData();
+			// Fetch all synthetic monitor data
+			const monitorData = await fetchAllMonitorData();
 
-		if (!monitorData || monitorData.length === 0) {
-			log("No monitor data found");
-			return;
-		}
+			if (!monitorData || monitorData.length === 0) {
+				log("No monitor data found");
+				return;
+			}
 
-		log(`Retrieved ${monitorData.length} monitor records`);
+			log(`Retrieved ${monitorData.length} monitor records`);
 
-		// Process and transform the monitor data
-		const transformedData = await transformMonitorData(monitorData);
+			// Process and transform the monitor data
+			const transformedData = await transformMonitorData(monitorData);
 
-		// Send to Kafka topic
-		await sendMonitorDataToKafka(transformedData);
+			// Send to Kafka topic
+			await sendMonitorDataToKafka(transformedData);
 
-		log("Monitor extraction completed successfully");
-		
-		// Add attributes to the span
-		span.setAttributes({
-			"extraction.monitor_count": monitorData.length,
-			"extraction.transformed_count": transformedData.length,
-			"extraction.status": "success"
-		});
+			log("Monitor extraction completed successfully");
+
+			// Add attributes to the span
+			span.setAttributes({
+				"extraction.monitor_count": monitorData.length,
+				"extraction.transformed_count": transformedData.length,
+				"extraction.status": "success",
+			});
 		} catch (error) {
 			err("Error in extraction process:", error);
 			span.recordException(error as Error);
 			span.setAttributes({
 				"extraction.status": "error",
-				"extraction.error": (error as Error).message
+				"extraction.error": (error as Error).message,
 			});
 			throw error;
 		} finally {
@@ -164,122 +164,124 @@ async function fetchAllMonitorData() {
 			const timeRange = config.extraction.timeRange;
 			const size = config.extraction.maxResults;
 			const monitorNameWildcard = config.extraction.monitorNamePattern;
-		// Build the query to get all synthetic monitors
-		const query: estypes.SearchRequest = {
-			index: config.extraction.indexPattern,
-			track_total_hits: true,
-			timeout: config.extraction.timeout,
-			size,
-			sort: [{ "@timestamp": "desc" }],
-			query: {
-				bool: {
-					must: [
-						{
-							wildcard: {
-								"monitor.name": monitorNameWildcard,
-							},
-						},
-						// Only get monitors that have a summary
-						{ exists: { field: "summary" } },
-						{
-							range: {
-								"@timestamp": {
-									gte: timeRange,
+			// Build the query to get all synthetic monitors
+			const query: estypes.SearchRequest = {
+				index: config.extraction.indexPattern,
+				track_total_hits: true,
+				timeout: config.extraction.timeout,
+				size,
+				sort: [{ "@timestamp": "desc" }],
+				query: {
+					bool: {
+						must: [
+							{
+								wildcard: {
+									"monitor.name": monitorNameWildcard,
 								},
 							},
-						},
-					],
-					// Make sure we're only getting synthetic monitoring data
-					filter: [
-						{
-							terms: {
-								"data_stream.dataset": ["http", "browser", "icmp", "tcp"],
+							// Only get monitors that have a summary
+							{ exists: { field: "summary" } },
+							{
+								range: {
+									"@timestamp": {
+										gte: timeRange,
+									},
+								},
 							},
-						},
-						{
-							term: {
-								"data_stream.type": "synthetics",
+						],
+						// Make sure we're only getting synthetic monitoring data
+						filter: [
+							{
+								terms: {
+									"data_stream.dataset": ["http", "browser", "icmp", "tcp"],
+								},
 							},
-						},
-					],
+							{
+								term: {
+									"data_stream.type": "synthetics",
+								},
+							},
+						],
+					},
 				},
-			},
-			// Include all the fields we need
-			_source: [
-				"monitor",
-				"url",
-				"@timestamp",
-				"tags",
-				"http",
-				"tcp",
-				"icmp",
-				"synthetics",
-				"agent",
-				"observer",
-				"meta",
-				"summary",
-				"state",
-				"data_stream",
-				"ecs",
-				"config_id",
-			],
-		};
+				// Include all the fields we need
+				_source: [
+					"monitor",
+					"url",
+					"@timestamp",
+					"tags",
+					"http",
+					"tcp",
+					"icmp",
+					"synthetics",
+					"agent",
+					"observer",
+					"meta",
+					"summary",
+					"state",
+					"data_stream",
+					"ecs",
+					"config_id",
+				],
+			};
 
-		log("Executing Elasticsearch query...");
-		log("Query parameters:", {
-			timeRange,
-			size,
-			index: config.extraction.indexPattern,
-			monitorNameWildcard,
-		});
+			log("Executing Elasticsearch query...");
+			log("Query parameters:", {
+				timeRange,
+				size,
+				index: config.extraction.indexPattern,
+				monitorNameWildcard,
+			});
 
-		// Use the client directly for more complex operations
-		const client = getElasticsearchClient();
-		const response = await client.search<ElasticsearchHit["_source"]>(query);
+			// Use the client directly for more complex operations
+			const client = getElasticsearchClient();
+			const response = await client.search<ElasticsearchHit["_source"]>(query);
 
-		log("Query response", {
-			elasticsearch_query: {
-				total: response.hits.total,
-				took: response.took,
-				timed_out: response.timed_out,
-				hits: response.hits.hits.length,
-			},
-		});
+			log("Query response", {
+				elasticsearch_query: {
+					total: response.hits.total,
+					took: response.took,
+					timed_out: response.timed_out,
+					hits: response.hits.hits.length,
+				},
+			});
 
-		if (response.hits.hits.length === 0) {
-			log("No hits found. Checking if index exists...");
-			const indices = await client.cat.indices({ format: "json" });
-			log(
-				"Available indices:",
-				indices.map((idx) => idx.index),
-			);
-		}
+			if (response.hits.hits.length === 0) {
+				log("No hits found. Checking if index exists...");
+				const indices = await client.cat.indices({ format: "json" });
+				log(
+					"Available indices:",
+					indices.map((idx) => idx.index),
+				);
+			}
 
-		// Pass through raw hits without transformation
-		const rawHits = response.hits.hits.map((hit) => ({ _source: hit._source }));
+			// Pass through raw hits without transformation
+			const rawHits = response.hits.hits.map((hit) => ({
+				_source: hit._source,
+			}));
 
-		// Validate the Elasticsearch hits using the old validation method
-		const validatedHits = await validateElasticsearchHits(rawHits);
-		log(`Validated ${validatedHits.length} Elasticsearch hits`);
+			// Validate the Elasticsearch hits using the old validation method
+			const validatedHits = await validateElasticsearchHits(rawHits);
+			log(`Validated ${validatedHits.length} Elasticsearch hits`);
 
-		// Count by dataset type
-		const datasetCounts: Record<string, number> = {};
-		validatedHits.forEach((hit) => {
-			const dataset = hit._source.data_stream?.dataset || "unknown";
-			datasetCounts[dataset] = (datasetCounts[dataset] || 0) + 1;
-		});
-		log("Hits by dataset type", {
-			dataset_counts: datasetCounts,
-		});
+			// Count by dataset type
+			const datasetCounts: Record<string, number> = {};
+			validatedHits.forEach((hit) => {
+				const dataset = hit._source.data_stream?.dataset || "unknown";
+				datasetCounts[dataset] = (datasetCounts[dataset] || 0) + 1;
+			});
+			log("Hits by dataset type", {
+				dataset_counts: datasetCounts,
+			});
 
-		span.setAttributes({
-			"elasticsearch.hits_count": validatedHits.length,
-			"elasticsearch.query_took_ms": response.took,
-			"elasticsearch.time_range": timeRange,
-			"elasticsearch.index": config.extraction.indexPattern
-		});
-		
-		return validatedHits;
+			span.setAttributes({
+				"elasticsearch.hits_count": validatedHits.length,
+				"elasticsearch.query_took_ms": response.took,
+				"elasticsearch.time_range": timeRange,
+				"elasticsearch.index": config.extraction.indexPattern,
+			});
+
+			return validatedHits;
 		} catch (error: any) {
 			err(`Error fetching monitor data`, {
 				elasticsearch_error: error,
@@ -297,7 +299,7 @@ async function fetchAllMonitorData() {
 			span.recordException(error);
 			span.setAttributes({
 				"elasticsearch.error": error.message,
-				"elasticsearch.status_code": error.meta?.statusCode || 0
+				"elasticsearch.status_code": error.meta?.statusCode || 0,
 			});
 			return [];
 		} finally {

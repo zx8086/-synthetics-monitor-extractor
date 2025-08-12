@@ -354,7 +354,7 @@ export function startApiServer(port: number = config.metrics.port): Server {
 			return executeWithSpan(`${method} ${route}`, spanAttributes, async () => {
 				// Record incoming request inside the span context
 				recordHttpRequest(method, route);
-				
+
 				// Validate request security
 				const validationError = validateRequest(req, startTime);
 				if (validationError) {
@@ -552,18 +552,18 @@ export function startApiServer(port: number = config.metrics.port): Server {
 							if (clientId.startsWith("synthetics-extractor")) {
 								// Remove the synthetics-extractor prefix
 								const remaining = clientId.slice("synthetics-extractor".length);
-								
+
 								// Check if there's anything after synthetics-extractor
 								if (remaining.length === 0) {
 									return "Synthetics Extractor";
 								}
-								
+
 								// Remove the leading hyphen and uppercase the rest
 								const suffix = remaining.slice(1).toUpperCase();
-								
+
 								return `Synthetics Extractor ${suffix}`;
 							}
-							
+
 							// Fallback to original logic for other patterns
 							return clientId
 								.split("-")
@@ -578,10 +578,11 @@ export function startApiServer(port: number = config.metrics.port): Server {
 
 						// Get the HTML content as text
 						// In production, the public folder is in src/public, not dist/public
-						const publicPath = process.env.NODE_ENV === "production" 
-							? join(process.cwd(), "src", "public", "index.html")
-							: join(import.meta.dir, "public", "index.html");
-						
+						const publicPath =
+							process.env.NODE_ENV === "production"
+								? join(process.cwd(), "src", "public", "index.html")
+								: join(import.meta.dir, "public", "index.html");
+
 						const htmlContent = await Bun.file(publicPath).text();
 
 						// Replace both the title tag and the h1 tag content
@@ -612,18 +613,25 @@ export function startApiServer(port: number = config.metrics.port): Server {
 						try {
 							// Validate all external service connections
 							const summary = await validateConnections();
-							
+
 							const baseResponse = {
 								timestamp: new Date().toISOString(),
 								service: config.openTelemetry.serviceName,
-								version: config.openTelemetry.serviceVersion || process.env.BUILD_VERSION || "unknown",
+								version:
+									config.openTelemetry.serviceVersion ||
+									process.env.BUILD_VERSION ||
+									"unknown",
 								environment: process.env.NODE_ENV || "development",
 							};
 
 							// Extract service status from results
-							const elasticsearch = summary.results.find(r => r.service === "Elasticsearch");
-							const kafka = summary.results.find(r => r.service === "Kafka");
-							const opentelemetry = summary.results.filter(r => r.service.startsWith("OpenTelemetry"));
+							const elasticsearch = summary.results.find(
+								(r) => r.service === "Elasticsearch",
+							);
+							const kafka = summary.results.find((r) => r.service === "Kafka");
+							const opentelemetry = summary.results.filter((r) =>
+								r.service.startsWith("OpenTelemetry"),
+							);
 
 							if (summary.allConnected) {
 								const response = Response.json(
@@ -633,12 +641,20 @@ export function startApiServer(port: number = config.metrics.port): Server {
 										checks: {
 											elasticsearch: elasticsearch?.connected ? "OK" : "KO",
 											kafka: kafka?.connected ? "OK" : "KO",
-											opentelemetry: opentelemetry.length > 0 && opentelemetry.every(o => o.connected) ? "OK" : "KO",
+											opentelemetry:
+												opentelemetry.length > 0 &&
+												opentelemetry.every((o) => o.connected)
+													? "OK"
+													: "KO",
 										},
 									},
 									{ headers },
 								);
-								recordHttpResponseTime(performance.now() - startTime, route, 200);
+								recordHttpResponseTime(
+									performance.now() - startTime,
+									route,
+									200,
+								);
 								const span = trace.getActiveSpan();
 								if (span) {
 									span.setAttributes({
@@ -649,7 +665,9 @@ export function startApiServer(port: number = config.metrics.port): Server {
 								}
 								return response;
 							} else {
-								const failedServices = summary.results.filter(r => !r.connected);
+								const failedServices = summary.results.filter(
+									(r) => !r.connected,
+								);
 								const response = Response.json(
 									{
 										status: "KO",
@@ -657,20 +675,30 @@ export function startApiServer(port: number = config.metrics.port): Server {
 										checks: {
 											elasticsearch: elasticsearch?.connected ? "OK" : "KO",
 											kafka: kafka?.connected ? "OK" : "KO",
-											opentelemetry: opentelemetry.length > 0 && opentelemetry.every(o => o.connected) ? "OK" : "KO",
+											opentelemetry:
+												opentelemetry.length > 0 &&
+												opentelemetry.every((o) => o.connected)
+													? "OK"
+													: "KO",
 										},
-										errors: failedServices.map(s => s.error).filter(Boolean),
+										errors: failedServices.map((s) => s.error).filter(Boolean),
 									},
 									{ status: 503, headers },
 								);
-								recordHttpResponseTime(performance.now() - startTime, route, 503);
+								recordHttpResponseTime(
+									performance.now() - startTime,
+									route,
+									503,
+								);
 								const span = trace.getActiveSpan();
 								if (span) {
 									span.setAttributes({
 										"http.status_code": 503,
 										"api.endpoint_type": "health",
 										"health.status": "KO",
-										"health.failed_services": failedServices.map(s => s.service.toLowerCase()).join(","),
+										"health.failed_services": failedServices
+											.map((s) => s.service.toLowerCase())
+											.join(","),
 									});
 								}
 								return response;
@@ -681,9 +709,13 @@ export function startApiServer(port: number = config.metrics.port): Server {
 									status: "KO",
 									timestamp: new Date().toISOString(),
 									service: config.openTelemetry.serviceName,
-									version: config.openTelemetry.serviceVersion || process.env.BUILD_VERSION || "unknown",
+									version:
+										config.openTelemetry.serviceVersion ||
+										process.env.BUILD_VERSION ||
+										"unknown",
 									environment: process.env.NODE_ENV || "development",
-									error: error instanceof Error ? error.message : "Unknown error",
+									error:
+										error instanceof Error ? error.message : "Unknown error",
 								},
 								{ status: 503, headers },
 							);
@@ -694,7 +726,8 @@ export function startApiServer(port: number = config.metrics.port): Server {
 									"http.status_code": 503,
 									"api.endpoint_type": "health",
 									"health.status": "KO",
-									"error.type": error instanceof Error ? error.constructor.name : "Error",
+									"error.type":
+										error instanceof Error ? error.constructor.name : "Error",
 								});
 							}
 							return response;

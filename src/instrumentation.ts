@@ -15,6 +15,7 @@ import * as api from "@opentelemetry/api-logs";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
 import { WinstonInstrumentation } from "@opentelemetry/instrumentation-winston";
+import { KafkaInstrumentation } from "@platformatic/kafka-opentelemetry";
 import type { LogRecordExporter } from "@opentelemetry/sdk-logs";
 import {
 	BatchLogRecordProcessor,
@@ -265,6 +266,9 @@ async function initializeOpenTelemetryInternal() {
 					new WinstonInstrumentation({
 						enabled: true,
 						disableLogSending: true,
+					}),
+					new KafkaInstrumentation({
+						enabled: true,
 					}),
 				],
 			});

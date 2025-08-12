@@ -55,6 +55,9 @@ const kafkaBackoff = new ExponentialBackoff({
 export function getKafkaProducer(): KafkaProducer {
 	if (!producerInstance) {
 		log("Creating new Kafka producer");
+		log(
+			`Kafka configuration: brokers=${JSON.stringify(config.kafka.brokers)}, clientId=${config.kafka.clientId}`,
+		);
 
 		producerInstance = new Producer({
 			clientId: config.kafka.clientId,
@@ -191,108 +194,112 @@ export async function sendMonitorDataToKafka(
 			if (!monitorData || monitorData.length === 0) {
 				span.setAttributes({
 					"kafka.message_count": 0,
-					"kafka.status": "no_data"
+					"kafka.status": "no_data",
 				});
 				return;
 			}
 
 			const producer = getKafkaProducer();
 			const topicName = config.kafka.topicName;
-			
+
 			span.setAttributes({
 				"kafka.topic": topicName,
-				"kafka.message_count": monitorData.length
+				"kafka.message_count": monitorData.length,
 			});
 
 			return kafkaCircuitBreaker
 				.execute(async () => {
 					return kafkaBackoff.execute(async () => {
-				// Prepare all messages for the single topic
-				const messages: any[] = [];
+						// Prepare all messages for the single topic
+						const messages: any[] = [];
 
-				for (const item of monitorData) {
-					const domain = item.businessContext.domain || "unknown";
-					const timestamp = new Date(item.timestamp).getTime();
-					const rawKey = `raw::${domain}::${item.name}::${timestamp}`;
-					const uniqueKey = sanitizeKey(rawKey);
+						for (const item of monitorData) {
+							const domain = item.businessContext.domain || "unknown";
+							const timestamp = new Date(item.timestamp).getTime();
+							const rawKey = `raw::${domain}::${item.name}::${timestamp}`;
+							const uniqueKey = sanitizeKey(rawKey);
 
-					// Track message size metrics
-					const messageSize = Buffer.byteLength(JSON.stringify(item));
+							// Track message size metrics
+							const messageSize = Buffer.byteLength(JSON.stringify(item));
 
-					// Record in both prom-client (for backward compatibility) and OpenTelemetry
-					if (kafkaMessageSizeHistogram) {
-						kafkaMessageSizeHistogram.observe(
-							{ topic: topicName },
-							messageSize,
+							// Record in both prom-client (for backward compatibility) and OpenTelemetry
+							if (kafkaMessageSizeHistogram) {
+								kafkaMessageSizeHistogram.observe(
+									{ topic: topicName },
+									messageSize,
+								);
+							}
+
+							// Record in OpenTelemetry metrics
+							recordKafkaMessage(topicName, messageSize);
+
+							// Create headers as a plain object instead of a Map
+							const headers = createMessageHeaders(item);
+
+							// Log the message being sent
+							log(
+								`Sending message to Kafka: - ${uniqueKey} (type: ${item.type})`,
+							);
+
+							const kafkaMessage = createKafkaMessage(
+								topicName,
+								uniqueKey,
+								JSON.stringify(item),
+								headers,
+							);
+
+							messages.push(kafkaMessage);
+						}
+
+						// Send all messages to the single topic
+						log(`Sending ${messages.length} messages to topic: ${topicName}`);
+
+						await producer.send({
+							messages,
+							acks: ProduceAcks.LEADER, // Only wait for leader acknowledgment
+						});
+
+						log(
+							`Successfully sent ${messages.length} messages to ${topicName}`,
 						);
+
+						span.setAttributes({
+							"kafka.messages_sent": messages.length,
+							"kafka.status": "success",
+						});
+					});
+				})
+				.catch((error: any) => {
+					// Enhanced error logging with circuit breaker context
+					const errorInfo = {
+						kafka_error: {
+							message: error.message,
+							code: error.code,
+							name: error.name,
+						},
+						circuit_breaker_state: kafkaCircuitBreaker.getState(),
+						circuit_breaker_metrics: kafkaCircuitBreaker.getMetrics(),
+						retry_attempt: kafkaBackoff.getAttempts(),
+						topic: topicName,
+						message_count: monitorData.length,
+					};
+
+					if (error.code === "PLT_KFK_PRODUCER_ERROR") {
+						err(`Kafka producer error`, errorInfo);
+					} else if (error.code === "PLT_KFK_CONNECTION_ERROR") {
+						err(`Kafka connection error`, errorInfo);
+					} else {
+						err(`Kafka send error`, errorInfo);
 					}
 
-					// Record in OpenTelemetry metrics
-					recordKafkaMessage(topicName, messageSize);
-
-					// Create headers as a plain object instead of a Map
-					const headers = createMessageHeaders(item);
-
-					// Log the message being sent
-					log(`Sending message to Kafka: - ${uniqueKey} (type: ${item.type})`);
-
-					const kafkaMessage = createKafkaMessage(
-						topicName,
-						uniqueKey,
-						JSON.stringify(item),
-						headers,
-					);
-
-					messages.push(kafkaMessage);
-				}
-
-				// Send all messages to the single topic
-				log(`Sending ${messages.length} messages to topic: ${topicName}`);
-
-				await producer.send({
-					messages,
-					acks: ProduceAcks.LEADER, // Only wait for leader acknowledgment
+					span.recordException(error);
+					span.setAttributes({
+						"kafka.error": error.message,
+						"kafka.error_code": error.code || "unknown",
+						"kafka.status": "error",
+					});
+					throw error;
 				});
-
-				log(`Successfully sent ${messages.length} messages to ${topicName}`);
-				
-				span.setAttributes({
-					"kafka.messages_sent": messages.length,
-					"kafka.status": "success"
-				});
-			});
-		})
-		.catch((error: any) => {
-			// Enhanced error logging with circuit breaker context
-			const errorInfo = {
-				kafka_error: {
-					message: error.message,
-					code: error.code,
-					name: error.name,
-				},
-				circuit_breaker_state: kafkaCircuitBreaker.getState(),
-				circuit_breaker_metrics: kafkaCircuitBreaker.getMetrics(),
-				retry_attempt: kafkaBackoff.getAttempts(),
-				topic: topicName,
-				message_count: monitorData.length,
-			};
-
-			if (error.code === "PLT_KFK_PRODUCER_ERROR") {
-				err(`Kafka producer error`, errorInfo);
-			} else if (error.code === "PLT_KFK_CONNECTION_ERROR") {
-				err(`Kafka connection error`, errorInfo);
-			} else {
-				err(`Kafka send error`, errorInfo);
-			}
-			
-			span.recordException(error);
-			span.setAttributes({
-				"kafka.error": error.message,
-				"kafka.error_code": error.code || "unknown",
-				"kafka.status": "error"
-			});
-			throw error;
-		});
 		} finally {
 			span.end();
 		}
@@ -423,13 +430,13 @@ export async function checkKafkaConnection(): Promise<{
 			try {
 				// Use listTopics() method to get all topics
 				const topics = await admin.listTopics();
-				
+
 				// Ensure topics is an array
 				const topicList = Array.isArray(topics) ? topics : [];
-				
+
 				// Check if our configured topic exists
 				const topicExists = topicList.includes(config.kafka.topicName);
-				
+
 				if (topicExists) {
 					log(`✅ Topic '${config.kafka.topicName}' exists`);
 				} else {
